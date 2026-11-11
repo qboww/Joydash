@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>Joydash</title>
+    <link rel="icon" href="favicon.ico" sizes="any">
+    <link rel="icon" type="image/png" sizes="16x16" href="icons/homeboard-16.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/homeboard-32.png">
+    <link rel="icon" type="image/png" sizes="48x48" href="icons/homeboard-48.png">
+    <link rel="icon" type="image/png" sizes="96x96" href="icons/homeboard-96.png">
+    <link rel="shortcut icon" type="image/png" href="icons/homeboard-48.png">
+    <link rel="stylesheet" href="newtab.css">
+  </head>
+  <body>
+    <main class="page">
+      <div class="dashboard-layout">
+        <section class="history-section" aria-labelledby="history-heading">
+          <div class="section-heading">
+            <div class="history-heading-title">
+              <p class="eyebrow">BACK FOR MORE?</p>
+              <h2 id="history-heading">Recently viewed videos</h2>
+              <details class="history-info">
+                <summary aria-label="Preview information" title="Preview information">?</summary>
+                <div class="history-info-popover">
+                  <p class="history-info-heading">Preview details</p>
+                  <p id="history-info-status" class="history-info-status" role="status" aria-live="polite"></p>
+                  <p class="history-info-description">Counts reflect pages with usable poster images. Some pages may not expose one or may need site approval.</p>
+                </div>
+              </details>
+            </div>
+            <div class="history-actions">
+              <button id="load-previews" class="text-button preview-load-button" type="button">Load previews</button>
+              <button id="clear-previews" class="text-button" type="button">Clear saved art</button>
+              <div class="bookmark-actions">
+                <button id="enable-automatic-previews" class="text-button" type="button" title="Grants Joydash optional access to all websites; preview requests remain limited to your selected bookmark folder.">Allow all sites</button>
+                <label class="folder-picker">
+                  <select id="bookmark-folder" aria-label="Choose a Firefox folder" disabled>
+                    <option>Loading folders...</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          </div>
+          <p id="bookmark-status" class="section-status" role="status" aria-live="polite"></p>
+          <p id="history-status" class="section-status" role="status" aria-live="polite"></p>
+          <div class="history-filters" role="search" aria-label="Filter history">
+            <div class="history-search-control">
+              <input id="history-search" type="search" placeholder="Search title, site, or URL" aria-label="Search history by title, site, or URL" autocomplete="off">
+              <button id="clear-history-search" class="text-button history-clear-search" type="button" aria-label="Clear history search" hidden>Clear</button>
+            </div>
+            <select id="history-site-filter" aria-label="Filter history by site">
+              <option value="">All bookmarked sites</option>
+            </select>
+            <select id="history-date-filter" aria-label="Filter history by date">
+              <option value="">Any date</option>
+              <option value="24h">Past 24 hours</option>
+              <option value="7d">Past 7 days</option>
+              <option value="30d">Past 30 days</option>
+            </select>
+            <div class="history-filter-actions">
+              <label class="video-only-filter">
+                <input id="history-video-only" type="checkbox" checked>
+                <span>Videos only</span>
+              </label>
+              <label class="video-only-filter" title="Show videos without previews">
+                <input id="history-include-no-preview" type="checkbox" aria-label="Show videos without previews">
+                <span>No preview</span>
+              </label>
+              <button id="reset-history-filters" class="text-button history-filter-reset" type="button">Reset filters</button>
+            </div>
+          </div>
+          <p id="history-filter-status" class="history-filter-status" role="status" aria-live="polite"></p>
+          <div id="history-grid" class="history-grid"></div>
+          <p id="history-empty" class="empty-state" hidden></p>
+          <div class="history-pagination">
+            <button id="load-more-history" class="text-button load-more-button" type="button" hidden>View more</button>
+            <button id="show-less-history" class="text-button show-less-button" type="button" hidden>Show less</button>
+          </div>
+        </section>
+
+        <aside class="history-rail" aria-labelledby="favorite-history-heading">
+          <div class="history-rail-heading">
+            <div>
+              <p class="eyebrow">FAVORITE SITES</p>
+              <h2 id="favorite-history-heading">History</h2>
+            </div>
+            <span id="favorite-history-count" class="history-rail-count"></span>
+          </div>
+          <div id="favorite-history-list" class="favorite-history-list"></div>
+          <p id="favorite-history-empty" class="empty-state history-rail-empty" role="status" aria-live="polite" hidden></p>
+        </aside>
+
+        <section class="bookmarks-section" aria-label="Favorite bookmarks">
+          <div id="bookmark-grid" class="bookmark-grid"></div>
+          <p id="bookmark-empty" class="empty-state" hidden></p>
+        </section>
+      </div>
+
+      <footer class="asset-credit">
+        <a href="https://icons8.com/" target="_blank" rel="noopener noreferrer">Monkey icon by Icons8</a>
+      </footer>
+    </main>
+    <div id="history-hover-preview" class="history-hover-preview" role="group" aria-label="History preview" aria-hidden="true">
+      <img id="history-hover-preview-image" alt="">
+      <span id="history-hover-preview-title" class="history-hover-preview-title"></span>
+      <span id="history-hover-preview-message" class="history-hover-preview-message" role="status" aria-live="polite"></span>
+    </div>
+    <script src="newtab.js"></script>
+  </body>
+</html>

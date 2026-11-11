@@ -1,30 +1,33 @@
 # Joydash
 
-A Firefox home-page dashboard for bookmarks, recent history, and video previews from bookmarked sites.
+Joydash is a Firefox home-page dashboard for bookmarks, recent history, and video or page previews from bookmarked sites.
 
-The recent-history grid and side History list share search, bookmarked-site, and date filters. By default, the History list shows all recent pages from bookmarked sites in the selected folder. **Videos only** and **No preview** affect the video grid only: **Videos only** is enabled by default, and video pages without a usable poster are hidden unless **No preview** is enabled. Search and filter changes apply after a short pause; newly displayed grid pages are automatically checked for previews. **Clear** removes only the text query, while **Reset filters** clears all filters and restores the defaults. Filters apply to loaded results from the selected bookmark folder; **View more** searches further back.
+## Features
 
-The extension reads Firefox bookmarks and history locally. The recent-video grid searches Firefox history in batches of up to 500 entries, starting with the most recently visited; **View more** continues into older history until Firefox has no more results. Only pages from hosts bookmarked directly in the selected Firefox folder are shown. The top folder picker controls both the favorites shelf and the history sites. A narrow side panel lists recent history from those same bookmarked sites, grouped by site and ordered newest first; on narrower layouts, the panel sizes to its content and caps at 320px. Each site starts with five history entries; **Load more** and **Show less** expand or collapse that site's list in batches of five. Site names and locally cached favicons are shown when available, with an initial as the icon fallback. Hover or keyboard-focus a history entry to see its saved video poster or request a generic page image. If the page or image host is not approved, the preview offers an **Allow** button that opens Firefox's permission prompt; no permission is requested automatically on hover. Generic hover images are cached in memory only and are fetched on demand. It checks further into history as needed to fill rows with identified video pages that have usable posters by default; enabling **No preview** also includes identified video pages without a poster. The usual batch is 13 cards on four-column layouts and 12 on two- or five-column layouts. Each **View more** click targets two rows of additional results, based on the current grid column count. Category and landing pages are hidden. Existing posters without a saved video classification are rechecked before they are shown. Favorites show direct website bookmarks from the selected folder in a compact bottom shelf on all screen sizes.
-
-Favorites are icon-only tiles from one selected folder, shown in a single horizontally scrollable row. Choosing another folder replaces the current row and saves the selection automatically. After a site origin is approved, Joydash reads that site's favicon and caches a small local copy; it does not send bookmark URLs to a third-party favicon service. Already-approved origins load automatically. **Allow all sites** is the single host-permission control; after you approve it, previews, favicons, and external images load automatically. This grants broad host access, but Joydash continues requesting content only from the selected folder's bookmarked sites and their preview image hosts. If a site does not provide a usable same-origin icon, its tile shows a local initial instead. Hovering a tile shows the bookmark title.
-
-The Joydash monkey icon is from [Icons8](https://icons8.com/).
-
-Open the **?** beside **Recently viewed videos** to see preview counts and availability details without adding them to the main view.
-
-Poster caching and automatic loading are always on. Joydash keeps a local snapshot of up to 500 recent pages from bookmarked sites in the selected folder and normally checks Firefox only for newer visits on reload. It fully reconciles history at least once a day, and after bookmark-folder/site changes or Firefox reports history removals. Page video classifications and preview-image URLs are cached for up to seven days (250 entries); up to 16 resized poster images are retained locally. **Clear saved art** removes poster images but keeps the history and preview metadata caches. Preview requests use only origins already approved in Firefox. Without **Allow all sites**, pages and images from unapproved hosts are skipped; the same button grants access for automatic loading. Requests omit cookies and referrers, reject redirects, and are size-limited to 512 KB of page HTML and 5 MB per image. The dashboard prefers image candidates with declared larger dimensions, then resizes them to at most 960 by 600 at JPEG quality 0.84. Each saved poster is capped at 400 KB; older cached posters refresh from approved sites while the saved copy remains visible. Sites may not expose a usable or high-resolution image, and a poster is not guaranteed to be an actual video frame.
-
-Firefox 140 or later is required for Firefox's built-in data-consent prompt. Joydash declares browsing activity, bookmark information, and website content because it reads history/bookmarks locally and requests page URLs and preview images from origins you approve. The developer does not receive this data.
-
-By default, optional host permissions are requested only for the origins needed. **Allow all sites** asks for broad `<all_urls>` permission; Firefox retains permissions you grant until you revoke them in the Add-ons Manager. Even with that broad permission, preview requests remain limited to the selected folder's bookmarked sites and discovered image hosts, and favicon requests are made only to bookmarked origins. Requests reveal your IP address and requested URL to each contacted site; they omit cookies and referrers. Third-party favicon hosts are not contacted. The extension does not request tab or cookie access.
+- Browse recent pages from sites bookmarked in a selected folder.
+- Search and filter history by site and date.
+- See video previews and open recent pages from the history panel.
+- Keep favorite bookmarks in a compact, scrollable shelf.
+- Cache history and preview data locally in Firefox.
 
 ## Try it in Firefox
 
-1. Open `about:debugging#/runtime/this-firefox`.
-2. Select **Load Temporary Add-on...**.
-3. Choose `manifest.json` from this folder.
-4. Approve the bookmarks and history permissions, then open Firefox's home page to see Joydash and choose the folder you want to show. The selection is saved. The extension sets the home page; it does not replace new tabs.
-5. Select **Allow all sites** once and approve Firefox's broad host-access prompt. Joydash then automatically loads favicons and previews, including images from separate hosts, on the selected folder's sites. Later visits continue automatically until you revoke the permission in Firefox's Add-ons Manager.
-6. To apply code or permission changes to a temporary add-on, return to `about:debugging#/runtime/this-firefox` and select **Reload** for Joydash.
+Firefox 140 or later is required.
 
-Firefox temporary add-ons are removed when the browser closes. For the extension and its saved data to remain installed across browser restarts, install a signed Firefox add-on rather than using **Load Temporary Add-on...**.
+1. Open `about:debugging#/runtime/this-firefox`.
+2. Select **Load Temporary Add-on...** and choose this folder's `manifest.json`.
+3. Approve the bookmarks and history permissions.
+4. Open Firefox's home page and choose a bookmark folder.
+5. Grant site access when prompted to load previews and favicons. **Allow all sites** grants broad optional host access; you can also grant access site by site.
+
+Temporary add-ons are removed when Firefox closes. Install a signed add-on to keep Joydash installed across restarts. Joydash sets the home page; it does not replace new tabs.
+
+## Privacy
+
+Bookmarks and history are read locally. When you allow site access, Joydash may request page and image URLs from bookmarked sites to load previews and favicons. Those sites can see your IP address and the requested URL; requests omit cookies and referrers. The developer does not receive this data.
+
+For details on filtering, caching, permissions, and request limits, see [Behavior, caching, and privacy](docs/behavior-and-privacy.md).
+
+## Credits
+
+The Joydash monkey icon is from [Icons8](https://icons8.com/).

@@ -76,6 +76,23 @@ select {
   font-size: 11px;
 }
 
+.dashboard-section-arranger-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.dashboard-section-arranger-heading .dashboard-section-arranger-title {
+  margin: 0;
+}
+
+.dashboard-section-arranger-close {
+  min-height: 28px;
+  padding: 0 10px;
+}
+
 .dashboard-section-order-list {
   display: grid;
   gap: 7px;
@@ -662,7 +679,26 @@ body {
 }
 
 .dashboard-header .history-actions {
+  min-width: 0;
   flex: 1 1 auto;
+}
+
+.dashboard-header .bookmark-actions {
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.dashboard-header .folder-picker {
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 180px;
+}
+
+.dashboard-header .folder-picker select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .history-section::before {

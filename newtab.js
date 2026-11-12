@@ -28,6 +28,7 @@ const historyFilterStatus = document.querySelector("#history-filter-status");
 const showLessHistoryButton = document.querySelector("#show-less-history");
 const loadMoreHistoryButton = document.querySelector("#load-more-history");
 const manageDashboardSectionsButton = document.querySelector("#manage-dashboard-sections");
+const closeDashboardSectionArrangerButton = document.querySelector("#close-dashboard-section-arranger");
 const saveDashboardSectionOrderButton = document.querySelector("#save-dashboard-section-order");
 const homeButtonEnabledCheckbox = document.querySelector("#show-home-button");
 const dashboardSectionArranger = document.querySelector("#dashboard-section-arranger");
@@ -560,7 +561,7 @@ function updateAutomaticSectionVisibility() {
         automaticSectionsRevealed.add(sectionId);
       }
       automaticSectionRevealInProgress = false;
-  updateAutomaticSectionVisibility();
+      updateAutomaticSectionVisibility();
     });
     return;
   }
@@ -4226,6 +4227,12 @@ manageDashboardSectionsButton.addEventListener("click", () => {
     renderDashboardSectionOrderList();
   }
   document.querySelector("#dashboard-settings").open = false;
+});
+
+closeDashboardSectionArrangerButton.addEventListener("click", () => {
+  dashboardSectionArranger.hidden = true;
+  manageDashboardSectionsButton.setAttribute("aria-expanded", "false");
+  document.querySelector("#dashboard-settings > summary").focus();
 });
 
 homeButtonEnabledCheckbox.addEventListener("change", async () => {

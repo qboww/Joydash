@@ -21,6 +21,16 @@
             <h1 id="dashboard-title" class="dashboard-title">Joydash</h1>
             <div class="history-actions" role="group" aria-label="Dashboard controls">
               <button id="toggle-discreet-mode" class="text-button" type="button" aria-pressed="false" hidden>Cover Joydash</button>
+              <button id="toggle-continue-section" class="text-button" type="button" aria-expanded="true">Hide previews</button>
+              <button id="load-previews" class="text-button preview-load-button" type="button">Load previews</button>
+              <div class="bookmark-actions">
+                <button id="enable-automatic-previews" class="text-button" type="button" title="Grants Joydash optional access to all websites so it can show the home button; preview requests remain limited to your selected bookmark folder.">Allow all sites</button>
+                <label class="folder-picker">
+                  <select id="bookmark-folder" aria-label="Choose a Firefox folder" disabled>
+                    <option>Loading folders...</option>
+                  </select>
+                </label>
+              </div>
               <details id="dashboard-settings" class="dashboard-settings">
                 <summary aria-label="Dashboard settings" title="Dashboard settings">
                   <img src="icons/settings.svg" alt="">
@@ -45,21 +55,14 @@
                   <button id="clear-previews" class="text-button" type="button">Clear saved art</button>
                 </div>
               </details>
-              <button id="toggle-continue-section" class="text-button" type="button" aria-expanded="true">Hide previews</button>
-              <button id="load-previews" class="text-button preview-load-button" type="button">Load previews</button>
-              <div class="bookmark-actions">
-                <button id="enable-automatic-previews" class="text-button" type="button" title="Grants Joydash optional access to all websites so it can show the home button; preview requests remain limited to your selected bookmark folder.">Allow all sites</button>
-                <label class="folder-picker">
-                  <select id="bookmark-folder" aria-label="Choose a Firefox folder" disabled>
-                    <option>Loading folders...</option>
-                  </select>
-                </label>
-              </div>
             </div>
           </header>
           <div id="dashboard-section-arranger" class="dashboard-section-arranger" hidden>
-            <p class="dashboard-section-arranger-title">Drag sections to reorder them, or use Up/Down.</p>
+            <p class="dashboard-section-arranger-title">Drag sections or use Up/Down, then save your order.</p>
             <ol id="dashboard-section-order-list" class="dashboard-section-order-list"></ol>
+            <div class="dashboard-section-order-actions">
+              <button id="save-dashboard-section-order" class="text-button" type="button" disabled>Save order</button>
+            </div>
             <p id="dashboard-section-order-status" class="dashboard-section-order-status" role="status" aria-live="polite"></p>
           </div>
           <div id="continue-content">

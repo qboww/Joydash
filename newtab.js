@@ -28,6 +28,7 @@ const historyFilterStatus = document.querySelector("#history-filter-status");
 const showLessHistoryButton = document.querySelector("#show-less-history");
 const loadMoreHistoryButton = document.querySelector("#load-more-history");
 const manageDashboardSectionsButton = document.querySelector("#manage-dashboard-sections");
+const saveDashboardSectionOrderButton = document.querySelector("#save-dashboard-section-order");
 const homeButtonEnabledCheckbox = document.querySelector("#show-home-button");
 const dashboardSectionArranger = document.querySelector("#dashboard-section-arranger");
 const dashboardSectionOrderList = document.querySelector("#dashboard-section-order-list");
@@ -92,6 +93,7 @@ let automaticSectionsInitialRevealComplete = false;
 let automaticSectionRevealInProgress = false;
 let automaticSectionsRevealed = new Set();
 let dashboardSectionOrder = [];
+let dashboardSectionOrderDraft = [];
 let dashboardSectionOrderSaving = false;
 let dashboardSectionPointerDrag = null;
 let shortcutPreferences = {};
@@ -408,12 +410,27 @@ function normalizeDashboardSectionOrder(savedOrder) {
   return [...new Set([...validSavedIds, ...availableIds])];
 }
 
+function hasDashboardSectionOrderChanges() {
+  return dashboardSectionOrderDraft.length !== dashboardSectionOrder.length ||
+    dashboardSectionOrderDraft.some((sectionId, index) =>
+      sectionId !== dashboardSectionOrder[index]
+    );
+}
+
+function setDashboardSectionOrderDraft(order) {
+  dashboardSectionOrderDraft = normalizeDashboardSectionOrder(order);
+  dashboardSectionOrderStatus.textContent = hasDashboardSectionOrderChanges()
+    ? "Unsaved order changes."
+    : "";
+  renderDashboardSectionOrderList();
+}
+
 function renderDashboardSectionOrderList() {
   dashboardSectionOrderList.replaceChildren();
   const sectionsById = new Map(
     getDashboardSections().map((section) => [section.dataset.dashboardSection, section])
   );
-  dashboardSectionOrder.forEach((sectionId, index) => {
+  dashboardSectionOrderDraft.forEach((sectionId, index) => {
     const section = sectionsById.get(sectionId);
     if (!section) {
       return;
@@ -434,7 +451,7 @@ function renderDashboardSectionOrderList() {
       button.setAttribute("aria-label", `Move ${section.dataset.dashboardSectionLabel} ${text.toLowerCase()}`);
       button.disabled = dashboardSectionOrderSaving ||
         index + direction < 0 ||
-        index + direction >= dashboardSectionOrder.length;
+        index + direction >= dashboardSectionOrderDraft.length;
       button.addEventListener("click", () => {
         void moveDashboardSection(sectionId, direction);
       });
@@ -443,10 +460,13 @@ function renderDashboardSectionOrderList() {
     item.append(label, controls);
     dashboardSectionOrderList.append(item);
   });
+  saveDashboardSectionOrderButton.disabled = dashboardSectionOrderSaving ||
+    !hasDashboardSectionOrderChanges();
 }
 
 function applyDashboardSectionOrder(order) {
   dashboardSectionOrder = normalizeDashboardSectionOrder(order);
+  dashboardSectionOrderDraft = [...dashboardSectionOrder];
   const sectionsById = new Map(
     getDashboardSections().map((section) => [section.dataset.dashboardSection, section])
   );
@@ -474,6 +494,7 @@ async function saveDashboardSectionOrder(order) {
   applyDashboardSectionOrder(nextOrder);
   try {
     await browser.storage.local.set({ dashboardSectionOrder });
+    dashboardSectionOrderStatus.textContent = "Section order saved.";
   } catch (error) {
     applyDashboardSectionOrder(previousOrder);
     dashboardSectionOrderStatus.textContent = `Could not save section order: ${error.message}`;
@@ -487,14 +508,14 @@ async function moveDashboardSection(sectionId, direction) {
   if (dashboardSectionOrderSaving) {
     return;
   }
-  const currentIndex = dashboardSectionOrder.indexOf(sectionId);
+  const currentIndex = dashboardSectionOrderDraft.indexOf(sectionId);
   const nextIndex = currentIndex + direction;
-  if (currentIndex < 0 || nextIndex < 0 || nextIndex >= dashboardSectionOrder.length) {
+  if (currentIndex < 0 || nextIndex < 0 || nextIndex >= dashboardSectionOrderDraft.length) {
     return;
   }
-  const nextOrder = [...dashboardSectionOrder];
+  const nextOrder = [...dashboardSectionOrderDraft];
   [nextOrder[currentIndex], nextOrder[nextIndex]] = [nextOrder[nextIndex], nextOrder[currentIndex]];
-  await saveDashboardSectionOrder(nextOrder);
+  setDashboardSectionOrderDraft(nextOrder);
 }
 
 function updateAutomaticSectionVisibility() {
@@ -4199,7 +4220,9 @@ manageDashboardSectionsButton.addEventListener("click", () => {
   manageDashboardSectionsButton.setAttribute("aria-expanded", String(!isExpanded));
   dashboardSectionArranger.hidden = isExpanded;
   if (!isExpanded) {
-    dashboardSectionOrderStatus.textContent = "";
+    dashboardSectionOrderStatus.textContent = hasDashboardSectionOrderChanges()
+      ? "Unsaved order changes."
+      : "";
     renderDashboardSectionOrderList();
   }
   document.querySelector("#dashboard-settings").open = false;
@@ -4216,6 +4239,12 @@ homeButtonEnabledCheckbox.addEventListener("change", async () => {
   } finally {
     homeButtonEnabledCheckbox.disabled = false;
   }
+});
+
+saveDashboardSectionOrderButton.addEventListener("click", async () => {
+  const order = [...dashboardSectionOrderList.children]
+    .map((item) => item.dataset.dashboardSection);
+  await saveDashboardSectionOrder(order);
 });
 
 function closeDashboardTabsAfterLinkOpen(event) {
@@ -4275,41 +4304,44 @@ document.addEventListener("pointermove", (event) => {
   }
 
   event.preventDefault();
-  const hoveredElement = document.elementFromPoint(event.clientX, event.clientY);
-  const target = hoveredElement?.closest(".dashboard-section-order-item");
-  if (!target || target === drag.item || target.parentElement !== dashboardSectionOrderList) {
+  const listBounds = dashboardSectionOrderList.getBoundingClientRect();
+  if (event.clientY < listBounds.top || event.clientY > listBounds.bottom) {
     return;
   }
-  const bounds = target.getBoundingClientRect();
-  const insertAfter = event.clientY > bounds.top + bounds.height / 2;
-  const insertBefore = insertAfter ? target.nextElementSibling : target;
-  if (insertBefore === drag.item ||
-      (!insertBefore && dashboardSectionOrderList.lastElementChild === drag.item)) {
+  const currentItems = [...dashboardSectionOrderList.children];
+  const currentIndex = currentItems.indexOf(drag.item);
+  const otherItems = currentItems.filter((item) => item !== drag.item);
+  const nextIndex = otherItems.findIndex((item) => {
+    const bounds = item.getBoundingClientRect();
+    return event.clientY < bounds.top + bounds.height / 2;
+  });
+  const destinationIndex = nextIndex < 0 ? otherItems.length : nextIndex;
+  if (destinationIndex === currentIndex) {
     return;
   }
 
-  const items = [...dashboardSectionOrderList.children];
-  for (const sectionItem of items) {
+  const affectedItems = otherItems.slice(
+    Math.min(currentIndex, destinationIndex),
+    Math.max(currentIndex, destinationIndex)
+  );
+  for (const sectionItem of affectedItems) {
     for (const animation of sectionItem.getAnimations()) {
       animation.cancel();
     }
   }
   const previousTops = new Map(
-    items.map((sectionItem) => [sectionItem, sectionItem.getBoundingClientRect().top])
+    affectedItems.map((sectionItem) => [sectionItem, sectionItem.getBoundingClientRect().top])
   );
-  dashboardSectionOrderList.insertBefore(drag.item, insertBefore);
+  dashboardSectionOrderList.insertBefore(drag.item, otherItems[destinationIndex] ?? null);
   if (reducedMotionPreference.matches) {
     return;
   }
-  for (const sectionItem of items) {
-    if (sectionItem === drag.item) {
-      continue;
-    }
+  for (const sectionItem of affectedItems) {
     const offset = previousTops.get(sectionItem) - sectionItem.getBoundingClientRect().top;
     if (offset !== 0) {
       sectionItem.animate(
         [{ transform: `translateY(${offset}px)` }, { transform: "translateY(0)" }],
-        { duration: 160, easing: "ease-out" }
+        { duration: 110, easing: "ease-out" }
       );
     }
   }
@@ -4325,10 +4357,9 @@ document.addEventListener("pointerup", (event) => {
     return;
   }
   event.preventDefault();
-  const nextOrder = [...dashboardSectionOrderList.children]
-    .map((item) => item.dataset.dashboardSection);
   drag.item.classList.remove("is-dragging");
-  void saveDashboardSectionOrder(nextOrder);
+  setDashboardSectionOrderDraft([...dashboardSectionOrderList.children]
+    .map((item) => item.dataset.dashboardSection));
 });
 
 document.addEventListener("pointercancel", (event) => {

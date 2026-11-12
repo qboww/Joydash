@@ -126,8 +126,18 @@ select {
   padding: 0 9px;
 }
 
+.dashboard-section-order-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 9px;
+}
+
+.dashboard-section-order-actions button {
+  min-width: 100px;
+}
+
 .dashboard-section-order-status {
-  margin: 9px 0 0;
+  margin: 7px 0 0;
   color: var(--gold);
   font-size: 11px;
 }
@@ -2280,6 +2290,7 @@ html.history-pagination-loading {
 
 .dashboard-settings {
   position: relative;
+  margin-left: auto;
 }
 
 .dashboard-settings > summary {

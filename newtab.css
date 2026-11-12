@@ -2282,7 +2282,7 @@ html.history-pagination-loading {
   position: relative;
 }
 
-.dashboard-settings summary {
+.dashboard-settings > summary {
   width: 34px;
   height: 34px;
   display: grid;
@@ -2298,35 +2298,31 @@ html.history-pagination-loading {
     background var(--hover-transition-duration) var(--ease-smooth);
 }
 
-.dashboard-settings summary::-webkit-details-marker {
+.dashboard-settings > summary::-webkit-details-marker {
   display: none;
 }
 
-.dashboard-settings summary::marker {
+.dashboard-settings > summary::marker {
   content: "";
 }
 
-.dashboard-settings summary:hover,
-.dashboard-settings[open] summary,
-.dashboard-settings summary:focus-visible {
+.dashboard-settings > summary:hover,
+.dashboard-settings[open] > summary,
+.dashboard-settings > summary:focus-visible {
   border-color: #fff;
   background: #111;
   color: #fff;
 }
 
-.dashboard-settings summary:focus-visible {
+.dashboard-settings > summary:focus-visible {
   outline: 2px solid #d5d7dc;
   outline-offset: 3px;
 }
 
-.dashboard-settings summary svg {
-  width: 16px;
-  height: 16px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.6;
+.dashboard-settings > summary img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
 }
 
 .discreet-mode-settings summary::-webkit-details-marker {
@@ -2365,6 +2361,8 @@ html.history-pagination-loading {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
   color: #e6e1dc;
   font-size: 11px;
+  display: grid;
+  gap: 10px;
 }
 
 .dashboard-settings-popover label {
@@ -2379,9 +2377,32 @@ html.history-pagination-loading {
 }
 
 .dashboard-settings-popover p {
-  margin: 8px 0 0;
+  margin: -5px 0 0;
   color: var(--muted);
   line-height: 1.45;
+}
+
+.dashboard-settings-popover .text-button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.dashboard-settings-popover .discreet-mode-settings {
+  width: 100%;
+}
+
+.dashboard-settings-popover .discreet-mode-popover {
+  width: 100%;
+  position: static;
+  margin-top: 8px;
+  box-shadow: none;
+}
+
+.dashboard-settings-popover .dashboard-settings-description + .discreet-mode-settings {
+  margin-top: 2px;
 }
 
 .discreet-mode-popover label {

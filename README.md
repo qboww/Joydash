@@ -35,4 +35,4 @@ For details on filtering, caching, permissions, and request limits, see [Behavio
 
 ## Credits
 
-The Joydash monkey icon is from [Icons8](https://icons8.com/).
+The Joydash monkey and settings icons are from [Icons8](https://icons8.com/).

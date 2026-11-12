@@ -21,35 +21,32 @@
             <h1 id="dashboard-title" class="dashboard-title">Joydash</h1>
             <div class="history-actions" role="group" aria-label="Dashboard controls">
               <button id="toggle-discreet-mode" class="text-button" type="button" aria-pressed="false" hidden>Cover Joydash</button>
-              <details id="discreet-mode-settings" class="discreet-mode-settings">
-                <summary class="text-button">Discreet settings</summary>
-                <div class="discreet-mode-popover">
-                  <label>
-                    <input id="discreet-mode-enabled" type="checkbox" checked>
-                    <span>Enable discreet mode</span>
-                  </label>
-                  <p>The cover stays on until Firefox closes. Turn it off here to disable the feature across restarts.</p>
-                </div>
-              </details>
               <details id="dashboard-settings" class="dashboard-settings">
                 <summary aria-label="Dashboard settings" title="Dashboard settings">
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"></path>
-                    <path d="m19.4 15 .1.1a1.8 1.8 0 1 1-2.5 2.5l-.1-.1a1.8 1.8 0 0 0-3 .9v.2a1.8 1.8 0 1 1-3.6 0v-.2a1.8 1.8 0 0 0-3-.9l-.1.1a1.8 1.8 0 1 1-2.5-2.5l.1-.1a1.8 1.8 0 0 0-.9-3h-.2a1.8 1.8 0 1 1 0-3.6h.2a1.8 1.8 0 0 0 .9-3l-.1-.1a1.8 1.8 0 1 1 2.5-2.5l.1.1a1.8 1.8 0 0 0 3-.9v-.2a1.8 1.8 0 1 1 3.6 0v.2a1.8 1.8 0 0 0 3 .9l.1-.1a1.8 1.8 0 1 1 2.5 2.5l-.1.1a1.8 1.8 0 0 0 .9 3h.2a1.8 1.8 0 1 1 0 3.6h-.2a1.8 1.8 0 0 0-.9 3Z" transform="translate(0 1) scale(.92)"></path>
-                  </svg>
+                  <img src="icons/settings.svg" alt="">
                 </summary>
                 <div class="dashboard-settings-popover">
                   <label>
                     <input id="show-home-button" type="checkbox" checked>
                     <span>Show floating Home button</span>
                   </label>
-                  <p>The button appears on websites when Allow all sites is enabled. Joydash pages close when you open a link from the dashboard.</p>
+                  <p class="dashboard-settings-description">The button appears on websites when Allow all sites is enabled.</p>
+                  <details id="discreet-mode-settings" class="discreet-mode-settings">
+                    <summary class="text-button">Discreet settings</summary>
+                    <div class="discreet-mode-popover">
+                      <label>
+                        <input id="discreet-mode-enabled" type="checkbox" checked>
+                        <span>Enable discreet mode</span>
+                      </label>
+                      <p>The cover stays on until Firefox closes. Turn it off here to disable the feature across restarts.</p>
+                    </div>
+                  </details>
+                  <button id="manage-dashboard-sections" class="text-button" type="button" aria-expanded="false" aria-controls="dashboard-section-arranger">Arrange sections</button>
+                  <button id="clear-previews" class="text-button" type="button">Clear saved art</button>
                 </div>
               </details>
-              <button id="manage-dashboard-sections" class="text-button" type="button" aria-expanded="false" aria-controls="dashboard-section-arranger">Arrange sections</button>
               <button id="toggle-continue-section" class="text-button" type="button" aria-expanded="true">Hide previews</button>
               <button id="load-previews" class="text-button preview-load-button" type="button">Load previews</button>
-              <button id="clear-previews" class="text-button" type="button">Clear saved art</button>
               <div class="bookmark-actions">
                 <button id="enable-automatic-previews" class="text-button" type="button" title="Grants Joydash optional access to all websites so it can show the home button; preview requests remain limited to your selected bookmark folder.">Allow all sites</button>
                 <label class="folder-picker">

@@ -307,24 +307,23 @@ function showBookmarkLoadError(error) {
 function getBookmarkFolders(root) {
   const folders = [];
 
-  function visit(folder, parentPath) {
+  function visit(folder) {
     if (!Array.isArray(folder.children)) {
       return;
     }
 
     const title = folder.title?.trim() || "Bookmarks";
-    const path = [...parentPath, title];
-    folders.push({ id: folder.id, label: path.join(" / ") });
+    folders.push({ id: folder.id, label: title });
     for (const child of folder.children) {
       if (Array.isArray(child.children)) {
-        visit(child, path);
+        visit(child);
       }
     }
   }
 
   for (const child of root.children ?? []) {
     if (Array.isArray(child.children)) {
-      visit(child, []);
+      visit(child);
     }
   }
   return folders;
@@ -4203,6 +4202,7 @@ manageDashboardSectionsButton.addEventListener("click", () => {
     dashboardSectionOrderStatus.textContent = "";
     renderDashboardSectionOrderList();
   }
+  document.querySelector("#dashboard-settings").open = false;
 });
 
 homeButtonEnabledCheckbox.addEventListener("change", async () => {
@@ -4379,6 +4379,17 @@ enableAutomaticPreviewsButton.addEventListener("click", async () => {
 });
 
 clearPreviewsButton.addEventListener("click", async () => {
+  const savedPreviewCount = Object.keys(previewCache).length;
+  if (savedPreviewCount === 0) {
+    historyStatus.textContent = "There is no saved poster art to clear.";
+    return;
+  }
+  const confirmed = window.confirm(
+    `Clear ${savedPreviewCount} saved poster${savedPreviewCount === 1 ? "" : "s"} from this device?`
+  );
+  if (!confirmed) {
+    return;
+  }
   clearPreviewsButton.disabled = true;
   try {
     await browser.storage.local.set({ previewCache: {} });

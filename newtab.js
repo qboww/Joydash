@@ -57,7 +57,7 @@ const randomVideoSlots = [1, 2].map((slotNumber) => {
 const randomVideoStatus = document.querySelector("#random-video-status");
 const favoriteHistoryList = document.querySelector("#favorite-history-list");
 const favoriteHistoryEmpty = document.querySelector("#favorite-history-empty");
-const favoriteHistoryCount = document.querySelector("#favorite-history-count");
+const historyRailClock = document.querySelector("#history-rail-clock");
 const historyHoverPreview = document.querySelector("#history-hover-preview");
 const historyHoverPreviewImage = document.querySelector("#history-hover-preview-image");
 const historyHoverPreviewTitle = document.querySelector("#history-hover-preview-title");
@@ -90,7 +90,6 @@ let automaticSectionRevealInProgress = false;
 let automaticSectionsRevealed = new Set();
 let dashboardSectionOrder = [];
 let dashboardSectionOrderSaving = false;
-let draggedDashboardSectionElement = null;
 let dashboardSectionPointerDrag = null;
 let shortcutPreferences = {};
 let manageShortcuts = false;
@@ -294,7 +293,6 @@ function showBookmarkLoadError(error) {
     slot.currentItem = null;
   }
   favoriteHistoryList.replaceChildren();
-  favoriteHistoryCount.textContent = "";
   favoriteHistoryEmpty.hidden = false;
   favoriteHistoryEmpty.textContent = "History is hidden until Firefox bookmarks are available.";
   loadPreviewsButton.disabled = true;
@@ -374,6 +372,21 @@ function renderFavoriteSiteOptions() {
 function getDashboardSections() {
   return [...dashboardSectionStack.children].filter((section) =>
     section.dataset.dashboardSection
+  );
+}
+
+function updateHistoryRailClock() {
+  const now = new Date();
+  const formattedTime = new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(now);
+  historyRailClock.textContent = formattedTime;
+  historyRailClock.dateTime = now.toISOString();
+  historyRailClock.setAttribute("aria-label", `Local time: ${formattedTime}`);
+  window.setTimeout(
+    updateHistoryRailClock,
+    60_000 - (Date.now() % 60_000)
   );
 }
 
@@ -2861,7 +2874,6 @@ function renderFavoriteHistory(items) {
   }
 
   favoriteHistoryList.replaceChildren();
-  favoriteHistoryCount.textContent = filteredItems.length > 0 ? `${filteredItems.length} pages` : "";
   favoriteHistoryEmpty.hidden = groups.length > 0;
   favoriteHistoryEmpty.textContent = bookmarkedSites.size === 0
     ? "Add a website bookmark to the selected folder to see its history."
@@ -4197,6 +4209,7 @@ dashboardSectionOrderList.addEventListener("pointerdown", (event) => {
     startY: event.clientY,
     active: false,
   };
+  dashboardSectionOrderList.setPointerCapture(event.pointerId);
 });
 
 document.addEventListener("pointermove", (event) => {
@@ -4211,7 +4224,6 @@ document.addEventListener("pointermove", (event) => {
       return;
     }
     drag.active = true;
-    draggedDashboardSectionElement = drag.item;
     drag.item.classList.add("is-dragging");
   }
 
@@ -4223,7 +4235,37 @@ document.addEventListener("pointermove", (event) => {
   }
   const bounds = target.getBoundingClientRect();
   const insertAfter = event.clientY > bounds.top + bounds.height / 2;
-  dashboardSectionOrderList.insertBefore(drag.item, insertAfter ? target.nextSibling : target);
+  const insertBefore = insertAfter ? target.nextElementSibling : target;
+  if (insertBefore === drag.item ||
+      (!insertBefore && dashboardSectionOrderList.lastElementChild === drag.item)) {
+    return;
+  }
+
+  const items = [...dashboardSectionOrderList.children];
+  for (const sectionItem of items) {
+    for (const animation of sectionItem.getAnimations()) {
+      animation.cancel();
+    }
+  }
+  const previousTops = new Map(
+    items.map((sectionItem) => [sectionItem, sectionItem.getBoundingClientRect().top])
+  );
+  dashboardSectionOrderList.insertBefore(drag.item, insertBefore);
+  if (reducedMotionPreference.matches) {
+    return;
+  }
+  for (const sectionItem of items) {
+    if (sectionItem === drag.item) {
+      continue;
+    }
+    const offset = previousTops.get(sectionItem) - sectionItem.getBoundingClientRect().top;
+    if (offset !== 0) {
+      sectionItem.animate(
+        [{ transform: `translateY(${offset}px)` }, { transform: "translateY(0)" }],
+        { duration: 160, easing: "ease-out" }
+      );
+    }
+  }
 });
 
 document.addEventListener("pointerup", (event) => {
@@ -4239,7 +4281,6 @@ document.addEventListener("pointerup", (event) => {
   const nextOrder = [...dashboardSectionOrderList.children]
     .map((item) => item.dataset.dashboardSection);
   drag.item.classList.remove("is-dragging");
-  draggedDashboardSectionElement = null;
   void saveDashboardSectionOrder(nextOrder);
 });
 
@@ -4250,7 +4291,6 @@ document.addEventListener("pointercancel", (event) => {
   }
   dashboardSectionPointerDrag = null;
   drag.item.classList.remove("is-dragging");
-  draggedDashboardSectionElement = null;
   if (drag.active) {
     renderDashboardSectionOrderList();
   }
@@ -4410,6 +4450,7 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 reducedMotionPreference.addEventListener("change", handleReducedMotionChange);
+updateHistoryRailClock();
 refreshAutomaticPreviewsButton();
 browser.bookmarks?.onCreated?.addListener(scheduleBookmarkRefresh);
 browser.bookmarks?.onChanged?.addListener(scheduleBookmarkRefresh);

@@ -108,7 +108,10 @@ select {
 
 .dashboard-section-order-item.is-dragging {
   cursor: grabbing;
-  opacity: 0.45;
+  border-color: rgba(255, 255, 255, 0.65);
+  background: #171717;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  opacity: 0.92;
 }
 
 .dashboard-section-order-controls {
@@ -1677,9 +1680,22 @@ html.history-pagination-loading {
   letter-spacing: -0.025em;
 }
 
-.history-rail-count {
+.history-rail-title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.history-rail-info .history-info-popover {
+  right: 0;
+  left: auto;
+}
+
+.history-rail-clock {
   color: #777d87;
-  font-size: 9px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 

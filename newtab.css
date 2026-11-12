@@ -1693,9 +1693,15 @@ html.history-pagination-loading {
 }
 
 .history-rail-clock {
-  color: #777d87;
-  font-size: 11px;
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #f3f4f6;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: 0.01em;
   white-space: nowrap;
 }
 

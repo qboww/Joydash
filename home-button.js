@@ -18,6 +18,10 @@ if (!globalThis.__joydashHomeButtonInstalled) {
       pointer-events: auto !important;
     }
 
+    :host([hidden]) {
+      display: none !important;
+    }
+
     button {
       all: initial;
       box-sizing: border-box;
@@ -100,4 +104,20 @@ if (!globalThis.__joydashHomeButtonInstalled) {
 
   shadowRoot.append(style, button);
   document.documentElement.append(host);
+
+  let homeButtonPreferenceChanged = false;
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local" || !changes.showHomeButton) {
+      return;
+    }
+    homeButtonPreferenceChanged = true;
+    host.hidden = changes.showHomeButton.newValue === false;
+  });
+  browser.storage.local.get("showHomeButton")
+    .then((preferences) => {
+      if (!homeButtonPreferenceChanged) {
+        host.hidden = preferences.showHomeButton === false;
+      }
+    })
+    .catch((error) => console.error("Could not read the Joydash Home button setting:", error));
 }

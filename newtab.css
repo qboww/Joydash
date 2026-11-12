@@ -2278,6 +2278,57 @@ html.history-pagination-loading {
   cursor: pointer;
 }
 
+.dashboard-settings {
+  position: relative;
+}
+
+.dashboard-settings summary {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(235, 206, 171, 0.2);
+  border-radius: 50%;
+  background: #000;
+  color: #d7c3b4;
+  cursor: pointer;
+  list-style: none;
+  transition: border-color var(--hover-transition-duration) var(--ease-smooth),
+    color var(--hover-transition-duration) var(--ease-smooth),
+    background var(--hover-transition-duration) var(--ease-smooth);
+}
+
+.dashboard-settings summary::-webkit-details-marker {
+  display: none;
+}
+
+.dashboard-settings summary::marker {
+  content: "";
+}
+
+.dashboard-settings summary:hover,
+.dashboard-settings[open] summary,
+.dashboard-settings summary:focus-visible {
+  border-color: #fff;
+  background: #111;
+  color: #fff;
+}
+
+.dashboard-settings summary:focus-visible {
+  outline: 2px solid #d5d7dc;
+  outline-offset: 3px;
+}
+
+.dashboard-settings summary svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.6;
+}
+
 .discreet-mode-settings summary::-webkit-details-marker {
   display: none;
 }
@@ -2299,6 +2350,38 @@ html.history-pagination-loading {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
   color: #e6e1dc;
   font-size: 11px;
+}
+
+.dashboard-settings-popover {
+  width: min(280px, calc(100vw - 32px));
+  padding: 14px;
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 8px);
+  right: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #101010;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+  color: #e6e1dc;
+  font-size: 11px;
+}
+
+.dashboard-settings-popover label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.dashboard-settings-popover input {
+  accent-color: var(--gold);
+}
+
+.dashboard-settings-popover p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  line-height: 1.45;
 }
 
 .discreet-mode-popover label {

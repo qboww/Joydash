@@ -28,6 +28,7 @@ const historyFilterStatus = document.querySelector("#history-filter-status");
 const showLessHistoryButton = document.querySelector("#show-less-history");
 const loadMoreHistoryButton = document.querySelector("#load-more-history");
 const manageDashboardSectionsButton = document.querySelector("#manage-dashboard-sections");
+const homeButtonEnabledCheckbox = document.querySelector("#show-home-button");
 const dashboardSectionArranger = document.querySelector("#dashboard-section-arranger");
 const dashboardSectionOrderList = document.querySelector("#dashboard-section-order-list");
 const dashboardSectionOrderStatus = document.querySelector("#dashboard-section-order-status");
@@ -72,6 +73,7 @@ const discreetCoverStatus = document.querySelector("#discreet-cover-status");
 const revealDiscreetCoverButton = document.querySelector("#reveal-discreet-cover");
 const disableDiscreetModeButton = document.querySelector("#disable-discreet-mode");
 const dashboardPage = document.querySelector(".page");
+const dashboardPagePort = browser.runtime.connect({ name: "joydash-dashboard-page" });
 
 let bookmarkFolders = [];
 let selectedBookmarkFolderId = "";
@@ -216,10 +218,11 @@ function updateDiscreetModeUI() {
 
 async function initializeDiscreetMode() {
   const [preferences, session] = await Promise.all([
-    browser.storage.local.get("discreetModeEnabled"),
+    browser.storage.local.get(["discreetModeEnabled", "showHomeButton"]),
     browser.storage.session.get("discreetCoverActive")
   ]);
   discreetModeEnabled = preferences.discreetModeEnabled !== false;
+  homeButtonEnabledCheckbox.checked = preferences.showHomeButton !== false;
   discreetCoverActive = discreetModeEnabled && session.discreetCoverActive === true;
   discreetModeInitialized = true;
   updateDiscreetModeUI();
@@ -4201,6 +4204,42 @@ manageDashboardSectionsButton.addEventListener("click", () => {
     renderDashboardSectionOrderList();
   }
 });
+
+homeButtonEnabledCheckbox.addEventListener("change", async () => {
+  const enabled = homeButtonEnabledCheckbox.checked;
+  homeButtonEnabledCheckbox.disabled = true;
+  try {
+    await browser.storage.local.set({ showHomeButton: enabled });
+  } catch (error) {
+    homeButtonEnabledCheckbox.checked = !enabled;
+    historyStatus.textContent = `Could not save Home button setting: ${error.message}`;
+  } finally {
+    homeButtonEnabledCheckbox.disabled = false;
+  }
+});
+
+function closeDashboardTabsAfterLinkOpen(event) {
+  const isPrimaryClick = event.type === "click" && event.button === 0;
+  const isMiddleClick = event.type === "auxclick" && event.button === 1;
+  if ((!isPrimaryClick && !isMiddleClick) || event.defaultPrevented) {
+    return;
+  }
+  const link = event.target.closest("a[href]");
+  if (!link || link.target.toLowerCase() !== "_blank" || link.hasAttribute("download")) {
+    return;
+  }
+  const url = new URL(link.href);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    return;
+  }
+  window.setTimeout(() => {
+    browser.runtime.sendMessage({ type: "joydash:close-dashboard-tabs" })
+      .catch((error) => console.error("Could not close Joydash tabs:", error));
+  }, 0);
+}
+
+document.addEventListener("click", closeDashboardTabsAfterLinkOpen);
+document.addEventListener("auxclick", closeDashboardTabsAfterLinkOpen);
 
 dashboardSectionOrderList.addEventListener("pointerdown", (event) => {
   const item = event.target.closest(".dashboard-section-order-item");

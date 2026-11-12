@@ -91,6 +91,7 @@ let automaticSectionsRevealed = new Set();
 let dashboardSectionOrder = [];
 let dashboardSectionOrderSaving = false;
 let draggedDashboardSectionElement = null;
+let dashboardSectionPointerDrag = null;
 let shortcutPreferences = {};
 let manageShortcuts = false;
 let draggedShortcut = null;
@@ -397,18 +398,7 @@ function renderDashboardSectionOrderList() {
     const item = document.createElement("li");
     item.className = "dashboard-section-order-item";
     item.dataset.dashboardSection = sectionId;
-    item.draggable = !dashboardSectionOrderSaving;
-    item.setAttribute("aria-roledescription", "draggable section");
-    item.addEventListener("dragstart", (event) => {
-      if (dashboardSectionOrderSaving || event.target.closest("button")) {
-        event.preventDefault();
-        return;
-      }
-      draggedDashboardSectionElement = item;
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", sectionId);
-      item.classList.add("is-dragging");
-    });
+    item.draggable = false;
     const label = document.createElement("span");
     label.textContent = section.dataset.dashboardSectionLabel;
     const controls = document.createElement("div");
@@ -4192,38 +4182,78 @@ manageDashboardSectionsButton.addEventListener("click", () => {
   }
 });
 
-dashboardSectionOrderList.addEventListener("dragover", (event) => {
-  const target = event.target.closest(".dashboard-section-order-item");
-  if (!draggedDashboardSectionElement ||
-      !target ||
-      target === draggedDashboardSectionElement ||
-      dashboardSectionOrderSaving) {
+dashboardSectionOrderList.addEventListener("pointerdown", (event) => {
+  const item = event.target.closest(".dashboard-section-order-item");
+  if (dashboardSectionOrderSaving ||
+      event.button !== 0 ||
+      !item ||
+      event.target.closest("button")) {
     return;
   }
-  event.preventDefault();
-  const bounds = target.getBoundingClientRect();
-  const insertAfter = event.clientY > bounds.top + bounds.height / 2;
-  dashboardSectionOrderList.insertBefore(
-    draggedDashboardSectionElement,
-    insertAfter ? target.nextSibling : target
-  );
+  dashboardSectionPointerDrag = {
+    item,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    active: false,
+  };
 });
 
-dashboardSectionOrderList.addEventListener("drop", (event) => {
-  if (!draggedDashboardSectionElement || dashboardSectionOrderSaving) {
+document.addEventListener("pointermove", (event) => {
+  const drag = dashboardSectionPointerDrag;
+  if (!drag || event.pointerId !== drag.pointerId || dashboardSectionOrderSaving) {
+    return;
+  }
+
+  if (!drag.active) {
+    const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+    if (distance < 5) {
+      return;
+    }
+    drag.active = true;
+    draggedDashboardSectionElement = drag.item;
+    drag.item.classList.add("is-dragging");
+  }
+
+  event.preventDefault();
+  const hoveredElement = document.elementFromPoint(event.clientX, event.clientY);
+  const target = hoveredElement?.closest(".dashboard-section-order-item");
+  if (!target || target === drag.item || target.parentElement !== dashboardSectionOrderList) {
+    return;
+  }
+  const bounds = target.getBoundingClientRect();
+  const insertAfter = event.clientY > bounds.top + bounds.height / 2;
+  dashboardSectionOrderList.insertBefore(drag.item, insertAfter ? target.nextSibling : target);
+});
+
+document.addEventListener("pointerup", (event) => {
+  const drag = dashboardSectionPointerDrag;
+  if (!drag || event.pointerId !== drag.pointerId) {
+    return;
+  }
+  dashboardSectionPointerDrag = null;
+  if (!drag.active) {
     return;
   }
   event.preventDefault();
   const nextOrder = [...dashboardSectionOrderList.children]
     .map((item) => item.dataset.dashboardSection);
-  draggedDashboardSectionElement.classList.remove("is-dragging");
+  drag.item.classList.remove("is-dragging");
   draggedDashboardSectionElement = null;
   void saveDashboardSectionOrder(nextOrder);
 });
 
-dashboardSectionOrderList.addEventListener("dragend", () => {
-  draggedDashboardSectionElement?.classList.remove("is-dragging");
+document.addEventListener("pointercancel", (event) => {
+  const drag = dashboardSectionPointerDrag;
+  if (!drag || event.pointerId !== drag.pointerId) {
+    return;
+  }
+  dashboardSectionPointerDrag = null;
+  drag.item.classList.remove("is-dragging");
   draggedDashboardSectionElement = null;
+  if (drag.active) {
+    renderDashboardSectionOrderList();
+  }
 });
 
 toggleContinueSectionButton.addEventListener("click", async () => {

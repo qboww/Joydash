@@ -69,8 +69,8 @@
             <p id="dashboard-section-order-status" class="dashboard-section-order-status" role="status" aria-live="polite"></p>
           </div>
           <div id="continue-content">
-            <div id="dashboard-section-stack" class="dashboard-section-stack">
-              <section id="recent-history-section" class="dashboard-content-section" data-dashboard-section="recent-history" data-dashboard-section-label="Recent history" aria-labelledby="history-heading">
+            <div id="dashboard-section-stack" class="dashboard-section-stack" hidden>
+              <section id="recent-history-section" class="dashboard-content-section" data-dashboard-section="recent-history" data-dashboard-section-label="Recent history" aria-labelledby="history-heading" hidden>
                 <div class="section-heading recent-history-heading">
                   <div class="history-heading-title">
                     <h2 id="history-heading">Continue where you left off</h2>
@@ -147,6 +147,7 @@
                   <div>
                     <h3 id="random-video-heading">Random previews</h3>
                     <p>Two previews rotate every five seconds; muted clips play when available. Use the top arrows to revisit up to three pairs you haven't opened.</p>
+                    <p id="random-video-status" class="automatic-history-status random-video-status" role="status" aria-live="polite"></p>
                   </div>
                   <div class="random-video-heading-controls">
                     <button id="random-video-back" class="random-video-nav" type="button" aria-label="Go back to previous previews" title="Previous previews" disabled>‹</button>
@@ -175,7 +176,6 @@
                     </a>
                   </div>
                 </div>
-                <p id="random-video-status" class="automatic-history-status" role="status" aria-live="polite"></p>
               </section>
             </div>
           </div>

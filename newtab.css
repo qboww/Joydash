@@ -169,6 +169,10 @@ select {
   gap: 22px;
 }
 
+.dashboard-section-stack[hidden] {
+  display: none;
+}
+
 .history-section,
 .bookmarks-section {
   width: min(100% - 2 * clamp(18px, 4vw, 64px), 1640px);
@@ -970,7 +974,7 @@ body {
   display: none;
 }
 
-.automatic-history-section.is-revealing {
+.dashboard-section-stack > .is-revealing {
   animation: automatic-history-section-reveal 450ms var(--ease-smooth) both;
 }
 
@@ -1067,6 +1071,11 @@ body {
 
 .random-video-heading-controls {
   flex: 0 0 auto;
+}
+
+.random-video-heading-row .random-video-status {
+  margin-top: 6px;
+  color: #aeb1b8;
 }
 
 .automatic-history-heading h3 {
@@ -1701,7 +1710,7 @@ html.history-pagination-loading {
   padding: 14px 12px 10px;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
   position: fixed;
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 14px;

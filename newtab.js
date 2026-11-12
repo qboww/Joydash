@@ -542,14 +542,16 @@ function updateAutomaticSectionVisibility() {
     }
     return;
   }
-  for (const section of automaticSections) {
+  dashboardSectionStack.hidden = false;
+  for (const section of getDashboardSections()) {
     const sectionId = section.dataset.dashboardSection;
     if (automaticSectionsRevealed.has(sectionId)) {
       continue;
     }
-    const shouldShow = sectionId === "favorite-sites"
-      ? bookmarkFolders.length > 0
-      : getAutomaticVideoItems().length > 0;
+    const shouldShow = sectionId === "recent-history" ||
+      (sectionId === "favorite-sites"
+        ? bookmarkFolders.length > 0
+        : getAutomaticVideoItems().length > 0);
     if (!shouldShow) {
       automaticSectionsRevealed.add(sectionId);
       continue;
@@ -3972,13 +3974,17 @@ async function loadBookmarks() {
   bookmarkStatus.textContent = "Reading your Firefox bookmarks…";
   favoriteSiteHistoryReady = false;
   favoriteSiteHistoryLoadVersion += 1;
-  const [tree, saved] = await Promise.all([
-    withTimeout(
-      browser.bookmarks.getTree(),
-      BOOKMARKS_TIMEOUT_MS,
-      "Firefox bookmarks did not respond within 5 seconds."
-    ),
-    browser.storage.local.get([
+  const treePromise = withTimeout(
+    browser.bookmarks.getTree(),
+    BOOKMARKS_TIMEOUT_MS,
+    "Firefox bookmarks did not respond within 5 seconds."
+  ).then(
+    (tree) => ({ ok: true, tree }),
+    (error) => ({ ok: false, error })
+  );
+  let saved;
+  try {
+    saved = await browser.storage.local.get([
       "bookmarkFolderIds",
       "bookmarkFolderId",
       "favoriteSiteHostname",
@@ -3986,9 +3992,17 @@ async function loadBookmarks() {
       "shortcutPreferences",
       "continueSectionCollapsed",
       "dashboardSectionOrder"
-    ])
-  ]);
+    ]);
+  } catch (error) {
+    applyDashboardSectionOrder([]);
+    throw error;
+  }
   applyDashboardSectionOrder(saved.dashboardSectionOrder);
+  const treeResult = await treePromise;
+  if (!treeResult.ok) {
+    throw treeResult.error;
+  }
+  const tree = treeResult.tree;
   manageDashboardSectionsButton.disabled = false;
   shortcutPreferences = saved.shortcutPreferences &&
     typeof saved.shortcutPreferences === "object" &&
@@ -4562,6 +4576,13 @@ initializeDiscreetMode()
       discreetCoverStatus.textContent = `Could not initialize discreet mode: ${error.message}`;
       revealDiscreetCoverButton.hidden = false;
       return;
+    }
+    dashboardSectionStack.hidden = false;
+    const recentHistorySection = getDashboardSections().find((section) =>
+      section.dataset.dashboardSection === "recent-history"
+    );
+    if (recentHistorySection) {
+      recentHistorySection.hidden = false;
     }
     showBookmarkLoadError(error);
     if (discreetCoverActive) {

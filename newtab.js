@@ -1,7 +1,17 @@
+if ("scrollRestoration" in window.history) {
+  window.history.scrollRestoration = "manual";
+}
+
 const bookmarkFolderSelect = document.querySelector("#bookmark-folder");
 const bookmarkStatus = document.querySelector("#bookmark-status");
 const bookmarkGrid = document.querySelector("#bookmark-grid");
 const bookmarkEmpty = document.querySelector("#bookmark-empty");
+const manageShortcutsButton = document.querySelector("#manage-shortcuts");
+const shortcutsHelp = document.querySelector("#shortcuts-help");
+const hiddenShortcuts = document.querySelector("#hidden-shortcuts");
+const hiddenShortcutList = document.querySelector("#hidden-shortcut-list");
+const continueContent = document.querySelector("#continue-content");
+const toggleContinueSectionButton = document.querySelector("#toggle-continue-section");
 const enableAutomaticPreviewsButton = document.querySelector("#enable-automatic-previews");
 const historyStatus = document.querySelector("#history-status");
 const historyInfoStatus = document.querySelector("#history-info-status");
@@ -17,6 +27,29 @@ const resetHistoryFiltersButton = document.querySelector("#reset-history-filters
 const historyFilterStatus = document.querySelector("#history-filter-status");
 const showLessHistoryButton = document.querySelector("#show-less-history");
 const loadMoreHistoryButton = document.querySelector("#load-more-history");
+const favoriteSiteVideosSection = document.querySelector("#favorite-site-videos-section");
+const favoriteSiteVideos = document.querySelector("#favorite-site-videos");
+const favoriteSiteSelect = document.querySelector("#favorite-site-select");
+const favoriteSitePreviousRowButton = document.querySelector("#favorite-site-previous-row");
+const favoriteSiteNextRowButton = document.querySelector("#favorite-site-next-row");
+const favoriteSiteStatus = document.querySelector("#favorite-site-status");
+const randomVideoSection = document.querySelector("#random-video-section");
+const randomVideoBackButton = document.querySelector("#random-video-back");
+const randomVideoForwardButton = document.querySelector("#random-video-forward");
+const randomVideoSlots = [1, 2].map((slotNumber) => {
+  const player = document.querySelector(`#random-video-player-${slotNumber}`);
+  return {
+    element: player.closest(".random-video-slot"),
+    player,
+    previousPoster: document.querySelector(`#random-video-previous-poster-${slotNumber}`),
+    poster: document.querySelector(`#random-video-poster-${slotNumber}`),
+    title: document.querySelector(`#random-video-title-${slotNumber}`),
+    site: document.querySelector(`#random-video-site-${slotNumber}`),
+    currentItem: null,
+    transitionTimer: null
+  };
+});
+const randomVideoStatus = document.querySelector("#random-video-status");
 const favoriteHistoryList = document.querySelector("#favorite-history-list");
 const favoriteHistoryEmpty = document.querySelector("#favorite-history-empty");
 const favoriteHistoryCount = document.querySelector("#favorite-history-count");
@@ -26,12 +59,29 @@ const historyHoverPreviewTitle = document.querySelector("#history-hover-preview-
 const historyHoverPreviewMessage = document.querySelector("#history-hover-preview-message");
 const clearPreviewsButton = document.querySelector("#clear-previews");
 const loadPreviewsButton = document.querySelector("#load-previews");
+const discreetModeToggleButton = document.querySelector("#toggle-discreet-mode");
+const discreetModeEnabledCheckbox = document.querySelector("#discreet-mode-enabled");
+const discreetCover = document.querySelector("#discreet-cover");
+const discreetCoverStatus = document.querySelector("#discreet-cover-status");
+const revealDiscreetCoverButton = document.querySelector("#reveal-discreet-cover");
+const disableDiscreetModeButton = document.querySelector("#disable-discreet-mode");
+const dashboardPage = document.querySelector(".page");
 
 let bookmarkFolders = [];
 let selectedBookmarkFolderId = "";
+let selectedFavoriteSiteHostname = "";
+let favoriteSiteRowIndex = 0;
+let favoriteSiteRowTransitionTimer = null;
 let allSitesPermissionGranted = false;
 let bookmarkGroups = [];
 let bookmarkedSites = new Map();
+let favoriteBookmarkedSites = new Map();
+let favoriteSiteHistoryItems = [];
+let favoriteSiteHistoryReady = false;
+let shortcutPreferences = {};
+let manageShortcuts = false;
+let draggedShortcut = null;
+let continueSectionCollapsed = false;
 let historyGroupLimits = new Map();
 let bookmarkIconsLoading = false;
 let faviconCache = {};
@@ -51,8 +101,29 @@ let historyLoadInProgress = false;
 let historyLoadRequested = false;
 let previewCache = {};
 let previewMetadataCache = {};
+let discreetModeEnabled = true;
+let discreetCoverActive = false;
+let discreetModeInitialized = false;
 let historySnapshot = null;
 let historySnapshotNeedsRefresh = false;
+let randomVideoObserver = null;
+let randomVideoIsVisible = false;
+let randomVideoVisibilityEventsAttached = false;
+let randomVideoTimer = null;
+let randomVideoSourceScanInProgress = false;
+let randomVideoAdvancePending = false;
+let randomVideoPlayedUrls = new Set();
+let randomVideoPermittedUrls = new Set();
+let randomVideoSourceAttempts = new Set();
+let favoriteSiteVideoObserver = null;
+let favoriteSiteVideosAreVisible = false;
+let favoriteSitePreviewScanInProgress = false;
+let favoriteSitePreviewAttempts = new Set();
+let favoriteSiteHistoryLoadVersion = 0;
+let randomVideoBackHistory = [];
+let randomVideoForwardHistory = [];
+let randomVideoClickedUrls = new Set();
+const reducedMotionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
 let activeHistoryPreviewEntry = null;
 let historyHoverPreviewTimer;
 let historyHoverPreviewHideTimer;
@@ -73,6 +144,13 @@ const PREVIEW_METADATA_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_HISTORY_HOVER_PREVIEWS = 16;
 const HISTORY_HOVER_PREVIEW_DELAY_MS = 180;
 const HISTORY_FILTER_DEBOUNCE_MS = 500;
+const MAX_FAVORITE_SITE_CARDS = 4;
+const MAX_FAVORITE_SITE_PREVIEW_ATTEMPTS_PER_SITE = 2;
+const MAX_FAVORITE_SITE_PREVIEW_CHECKS = 16;
+const PREVIEW_CLASSIFICATION_VERSION = 2;
+const MAX_RANDOM_VIDEO_SOURCE_SCANS = 8;
+const MAX_RANDOM_VIDEO_HISTORY = 3;
+const RANDOM_VIDEO_DURATION_MS = 5_000;
 const MAX_POSTER_DATA_URL_LENGTH = 400_000;
 const POSTER_QUALITY_VERSION = 2;
 const MAX_HTML_BYTES = 512 * 1024;
@@ -80,6 +158,10 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_FAVICON_BYTES = 256 * 1024;
 const MAX_FAVICON_CACHE = 64;
 const BOOKMARKS_TIMEOUT_MS = 5_000;
+
+for (const slot of randomVideoSlots) {
+  slot.element.addEventListener("click", handleRandomVideoSlotClick);
+}
 
 async function withTimeout(promise, timeoutMs, message) {
   let timeoutId;
@@ -95,6 +177,68 @@ async function withTimeout(promise, timeoutMs, message) {
   }
 }
 
+function updateDiscreetModeUI() {
+  discreetModeToggleButton.hidden = !discreetModeEnabled;
+  discreetModeToggleButton.setAttribute("aria-pressed", String(discreetCoverActive));
+  discreetCover.hidden = !discreetCoverActive;
+  revealDiscreetCoverButton.hidden = !discreetCoverActive;
+  disableDiscreetModeButton.hidden = !discreetCoverActive;
+  discreetModeEnabledCheckbox.checked = discreetModeEnabled;
+  dashboardPage.inert = discreetCoverActive;
+  historyHoverPreview.inert = discreetCoverActive;
+  discreetCoverStatus.textContent = discreetCoverActive
+    ? "Your dashboard stays covered until you reveal it or Firefox closes."
+    : "";
+  updateRandomVideoPlayback();
+}
+
+async function initializeDiscreetMode() {
+  const [preferences, session] = await Promise.all([
+    browser.storage.local.get("discreetModeEnabled"),
+    browser.storage.session.get("discreetCoverActive")
+  ]);
+  discreetModeEnabled = preferences.discreetModeEnabled !== false;
+  discreetCoverActive = discreetModeEnabled && session.discreetCoverActive === true;
+  discreetModeInitialized = true;
+  updateDiscreetModeUI();
+}
+
+async function setDiscreetCover(active) {
+  if (active && !discreetModeEnabled) {
+    return;
+  }
+  await browser.storage.session.set({ discreetCoverActive: active });
+  discreetCoverActive = active;
+  updateDiscreetModeUI();
+  if (active) {
+    revealDiscreetCoverButton.focus();
+  } else {
+    discreetModeToggleButton.focus();
+  }
+}
+
+async function setDiscreetModeEnabled(enabled) {
+  const wasCovered = discreetCoverActive;
+  await browser.storage.session.set({ discreetCoverActive: false });
+  try {
+    await browser.storage.local.set({ discreetModeEnabled: enabled });
+  } catch (error) {
+    if (wasCovered) {
+      try {
+        await browser.storage.session.set({ discreetCoverActive: true });
+      } catch (restoreError) {
+        throw new Error(
+          `Could not save discreet mode: ${error.message}. The cover could not be restored: ${restoreError.message}`
+        );
+      }
+    }
+    throw error;
+  }
+  discreetModeEnabled = enabled;
+  discreetCoverActive = false;
+  updateDiscreetModeUI();
+}
+
 function showBookmarkLoadError(error) {
   const option = document.createElement("option");
   option.textContent = "Bookmarks unavailable";
@@ -102,6 +246,9 @@ function showBookmarkLoadError(error) {
   bookmarkFolderSelect.disabled = true;
   bookmarkStatus.textContent = `Could not read Firefox bookmarks: ${error.message}`;
   bookmarkGrid.replaceChildren();
+  hiddenShortcutList.replaceChildren();
+  hiddenShortcuts.hidden = true;
+  shortcutsHelp.hidden = !manageShortcuts;
   bookmarkEmpty.hidden = false;
   bookmarkEmpty.textContent = "Check Joydash's Bookmarks permission in about:addons, then reload this tab.";
   bookmarkedSites = new Map();
@@ -117,6 +264,13 @@ function showBookmarkLoadError(error) {
   historyStatus.textContent = "Recent previews are hidden until Firefox bookmarks are available.";
   historyEmpty.hidden = false;
   historyEmpty.textContent = "Cannot verify your favorites, so previews are hidden.";
+  favoriteSiteVideos.replaceChildren();
+  favoriteSiteVideosSection.hidden = true;
+  randomVideoSection.hidden = true;
+  stopRandomVideoPlayback();
+  for (const slot of randomVideoSlots) {
+    slot.currentItem = null;
+  }
   favoriteHistoryList.replaceChildren();
   favoriteHistoryCount.textContent = "";
   favoriteHistoryEmpty.hidden = false;
@@ -171,6 +325,56 @@ function renderBookmarkFolders() {
   bookmarkFolderSelect.disabled = bookmarkFolders.length === 0;
 }
 
+function renderFavoriteSiteOptions() {
+  favoriteSiteSelect.replaceChildren();
+  const allSitesOption = document.createElement("option");
+  allSitesOption.value = "";
+  allSitesOption.textContent = favoriteBookmarkedSites.size === 0
+    ? "No bookmarked sites found"
+    : "All bookmarked sites";
+  allSitesOption.disabled = favoriteBookmarkedSites.size === 0;
+  favoriteSiteSelect.append(allSitesOption);
+  const sortedSites = [...favoriteBookmarkedSites.values()].sort((first, second) =>
+    first.name.localeCompare(second.name) || first.hostname.localeCompare(second.hostname)
+  );
+  for (const site of sortedSites) {
+    const option = document.createElement("option");
+    option.value = site.hostname;
+    option.textContent = site.name === site.hostname
+      ? site.hostname
+      : `${site.name} (${site.hostname})`;
+    favoriteSiteSelect.append(option);
+  }
+  favoriteSiteSelect.value = selectedFavoriteSiteHostname;
+  favoriteSiteSelect.disabled = favoriteBookmarkedSites.size === 0;
+}
+
+function getShortcutPreference(group) {
+  const bookmarkIds = group.items.map((item) => item.id);
+  const saved = shortcutPreferences[group.id];
+  const savedOrder = Array.isArray(saved?.order)
+    ? saved.order.filter((id) => typeof id === "string" && bookmarkIds.includes(id))
+    : [];
+  const order = [...new Set([...savedOrder, ...bookmarkIds])];
+  const hidden = Array.isArray(saved?.hidden)
+    ? [...new Set(saved.hidden.filter((id) => typeof id === "string" && bookmarkIds.includes(id)))]
+    : [];
+  return { order, hidden };
+}
+
+function updateContinueSection() {
+  continueContent.hidden = continueSectionCollapsed;
+  toggleContinueSectionButton.textContent = continueSectionCollapsed ? "Show previews" : "Hide previews";
+  toggleContinueSectionButton.setAttribute("aria-expanded", String(!continueSectionCollapsed));
+  updateRandomVideoVisibility();
+  if (!continueSectionCollapsed && !favoriteSiteVideosSection.hidden) {
+    observeFavoriteSiteVideoSection();
+    if (favoriteSiteVideosAreVisible) {
+      void scanFavoriteSitePreviews();
+    }
+  }
+}
+
 function isWebsiteBookmark(item) {
   if (typeof item.url !== "string") {
     return false;
@@ -214,6 +418,10 @@ function getBookmarkedSites(bookmarks) {
 }
 
 function getBookmarkedSiteHostname(value) {
+  return getBookmarkedSiteHostnameFrom(value, bookmarkedSites);
+}
+
+function getBookmarkedSiteHostnameFrom(value, sites) {
   const url = getHistoryUrl(value);
   if (!url) {
     return null;
@@ -221,7 +429,17 @@ function getBookmarkedSiteHostname(value) {
   const labels = url.hostname.replace(/^www\./i, "").split(".");
   return labels
     .map((_, index) => labels.slice(index).join("."))
-    .find((hostname) => bookmarkedSites.has(hostname)) ?? null;
+    .find((hostname) => sites.has(hostname)) ?? null;
+}
+
+function getFavoriteBookmarkedSitesInScope() {
+  if (!selectedFavoriteSiteHostname) {
+    return favoriteBookmarkedSites;
+  }
+  const site = favoriteBookmarkedSites.get(selectedFavoriteSiteHostname);
+  return site
+    ? new Map([[selectedFavoriteSiteHostname, site]])
+    : favoriteBookmarkedSites;
 }
 
 function isBookmarkedWebsite(value) {
@@ -253,7 +471,13 @@ function findBookmarkFolder(root, id) {
 
 function renderBookmarks(groups) {
   bookmarkGrid.replaceChildren();
+  hiddenShortcutList.replaceChildren();
   bookmarkEmpty.hidden = groups.length > 0;
+  hiddenShortcuts.hidden = true;
+  bookmarkGrid.classList.toggle("is-arranging", manageShortcuts);
+  manageShortcutsButton.textContent = manageShortcuts ? "Done" : "Arrange";
+  manageShortcutsButton.setAttribute("aria-pressed", String(manageShortcuts));
+  shortcutsHelp.hidden = !manageShortcuts;
   if (groups.length === 0) {
     bookmarkEmpty.textContent = bookmarkFolders.length === 0
       ? "No Firefox bookmark folders were found."
@@ -263,6 +487,7 @@ function renderBookmarks(groups) {
     return;
   }
 
+  let hiddenShortcutCount = 0;
   for (const group of groups) {
     const groupElement = document.createElement("section");
     groupElement.className = "bookmark-group";
@@ -274,21 +499,71 @@ function renderBookmarks(groups) {
     headingRow.append(heading);
     const row = document.createElement("div");
     row.className = "bookmark-group-items";
-    if (group.items.length === 0) {
+    row.addEventListener("dragover", (event) => {
+      if (!manageShortcuts || draggedShortcut?.groupId !== group.id) {
+        return;
+      }
+      event.preventDefault();
+      const target = event.target.closest(".bookmark-icon-tile");
+      const draggedTile = row.querySelector(".bookmark-icon-tile.is-dragging");
+      if (!target || !draggedTile || target === draggedTile) {
+        return;
+      }
+      const targetBounds = target.getBoundingClientRect();
+      const insertAfter = event.clientX > targetBounds.left + targetBounds.width / 2;
+      row.insertBefore(draggedTile, insertAfter ? target.nextSibling : target);
+    });
+    row.addEventListener("drop", (event) => {
+      if (!manageShortcuts || draggedShortcut?.groupId !== group.id) {
+        return;
+      }
+      event.preventDefault();
+      const preference = getShortcutPreference(group);
+      const visibleOrder = [...row.querySelectorAll(".bookmark-icon-tile")]
+        .map((tile) => tile.dataset.bookmarkId);
+      let visibleIndex = 0;
+      preference.order = preference.order.map((id) =>
+        preference.hidden.includes(id) ? id : visibleOrder[visibleIndex++] ?? id
+      );
+      saveShortcutPreference(group.id, preference);
+    });
+    const preference = getShortcutPreference(group);
+    const bookmarksById = new Map(group.items.map((item) => [item.id, item]));
+    const orderedBookmarks = preference.order
+      .map((id) => bookmarksById.get(id))
+      .filter(Boolean);
+    const hiddenIds = new Set(preference.hidden);
+    const visibleBookmarks = orderedBookmarks.filter((bookmark) => !hiddenIds.has(bookmark.id));
+    if (visibleBookmarks.length === 0) {
       const empty = document.createElement("p");
       empty.className = "empty-state bookmark-group-empty";
-      empty.textContent = "No website bookmarks in this folder.";
+      empty.textContent = group.items.length === 0
+        ? "No website bookmarks in this folder."
+        : "No visible shortcuts. Choose Arrange to restore a hidden shortcut.";
       row.append(empty);
-      groupElement.append(headingRow, row);
-      bookmarkGrid.append(groupElement);
-      continue;
     }
 
-    for (const bookmark of group.items) {
+    for (const bookmark of visibleBookmarks) {
       const url = new URL(bookmark.url);
       const bookmarkLabel = bookmark.title?.trim() || url.hostname;
       const tile = document.createElement("article");
       tile.className = "bookmark-icon-tile";
+      tile.dataset.bookmarkId = bookmark.id;
+      tile.draggable = manageShortcuts;
+      tile.addEventListener("dragstart", (event) => {
+        if (!manageShortcuts) {
+          event.preventDefault();
+          return;
+        }
+        draggedShortcut = { groupId: group.id, bookmarkId: bookmark.id };
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", bookmark.id);
+        tile.classList.add("is-dragging");
+      });
+      tile.addEventListener("dragend", () => {
+        tile.classList.remove("is-dragging");
+        draggedShortcut = null;
+      });
       const link = document.createElement("a");
       link.className = "bookmark-icon-link";
       link.href = url.href;
@@ -312,12 +587,77 @@ function renderBookmarks(groups) {
         link.append(mark);
       }
       tile.append(link);
+      if (manageShortcuts) {
+        const controls = document.createElement("div");
+        controls.className = "shortcut-controls";
+        const hideButton = document.createElement("button");
+        hideButton.className = "shortcut-control-button";
+        hideButton.type = "button";
+        hideButton.textContent = "×";
+        hideButton.title = `Hide ${bookmarkLabel}`;
+        hideButton.setAttribute("aria-label", `Hide ${bookmarkLabel}`);
+        hideButton.addEventListener("click", () => {
+          setShortcutHidden(group.id, bookmark.id, true);
+        });
+        controls.append(hideButton);
+        tile.append(controls);
+      }
       row.append(tile);
     }
     groupElement.append(headingRow, row);
     bookmarkGrid.append(groupElement);
+
+    for (const bookmark of orderedBookmarks) {
+      if (!hiddenIds.has(bookmark.id)) {
+        continue;
+      }
+      hiddenShortcutCount += 1;
+      const url = new URL(bookmark.url);
+      const bookmarkLabel = bookmark.title?.trim() || url.hostname;
+      const restoreButton = document.createElement("button");
+      restoreButton.className = "text-button hidden-shortcut-button";
+      restoreButton.type = "button";
+      restoreButton.textContent = `Restore ${bookmarkLabel}`;
+      restoreButton.addEventListener("click", () => {
+        setShortcutHidden(group.id, bookmark.id, false);
+      });
+      hiddenShortcutList.append(restoreButton);
+    }
   }
 
+  manageShortcutsButton.textContent = manageShortcuts ? "Done" : "Arrange";
+  manageShortcutsButton.setAttribute("aria-pressed", String(manageShortcuts));
+  shortcutsHelp.hidden = !manageShortcuts;
+  hiddenShortcuts.hidden = !manageShortcuts || hiddenShortcutCount === 0;
+}
+
+async function saveShortcutPreference(groupId, preference) {
+  const nextPreferences = {
+    ...shortcutPreferences,
+    [groupId]: {
+      order: preference.order,
+      hidden: preference.hidden
+    }
+  };
+  try {
+    await browser.storage.local.set({ shortcutPreferences: nextPreferences });
+    shortcutPreferences = nextPreferences;
+    renderBookmarks(bookmarkGroups);
+  } catch (error) {
+    bookmarkStatus.textContent = `Could not save shortcut layout: ${error.message}`;
+  }
+}
+
+function setShortcutHidden(groupId, bookmarkId, hidden) {
+  const group = bookmarkGroups.find((item) => item.id === groupId);
+  if (!group) {
+    return;
+  }
+  const preference = getShortcutPreference(group);
+  preference.hidden = hidden
+    ? [...new Set([...preference.hidden, bookmarkId])]
+    : preference.hidden.filter((id) => id !== bookmarkId);
+  saveShortcutPreference(groupId, preference);
 }
 
 function getBookmarkOrigins(items) {
@@ -469,6 +809,11 @@ function getHistoryUrl(value) {
   }
 }
 
+function isSafeVideoSourceUrl(value) {
+  const url = getHistoryUrl(value);
+  return Boolean(url && !url.username && !url.password && url.href.length <= 4096);
+}
+
 function getHistorySnapshotKey() {
   return JSON.stringify([
     selectedBookmarkFolderId,
@@ -481,13 +826,22 @@ function isValidPreviewMetadata(url, entry, now = Date.now()) {
     getHistoryUrl(url) &&
     entry &&
     typeof entry.videoPage === "boolean" &&
+    (entry.videoPage !== false ||
+      entry.classificationVersion === PREVIEW_CLASSIFICATION_VERSION) &&
     Number.isFinite(entry.checkedAt) &&
     entry.checkedAt <= now &&
     now - entry.checkedAt < PREVIEW_METADATA_TTL_MS &&
     (entry.imageUrl === null ||
       (typeof entry.imageUrl === "string" &&
         entry.imageUrl.length <= 4096 &&
-        getHistoryUrl(entry.imageUrl)))
+        getHistoryUrl(entry.imageUrl))) &&
+    (entry.videoUrl === undefined ||
+      entry.videoUrl === null ||
+      (typeof entry.videoUrl === "string" &&
+        isSafeVideoSourceUrl(entry.videoUrl))) &&
+    (entry.videoCheckedAt === undefined ||
+      (Number.isFinite(entry.videoCheckedAt) &&
+        entry.videoCheckedAt <= now))
   );
 }
 
@@ -528,11 +882,16 @@ async function hasOriginPermission(value) {
 }
 
 async function updateAutomaticPreviewsButton() {
+  randomVideoPermittedUrls.clear();
+  randomVideoSourceAttempts.clear();
+  favoriteSitePreviewAttempts.clear();
   allSitesPermissionGranted = await browser.permissions.contains({
     origins: ["<all_urls>"]
   });
   enableAutomaticPreviewsButton.hidden = allSitesPermissionGranted;
   enableAutomaticPreviewsButton.disabled = allSitesPermissionGranted;
+  updateRandomVideoPlayback();
+  void scanFavoriteSitePreviews();
 }
 
 function refreshAutomaticPreviewsButton() {
@@ -549,11 +908,11 @@ function createHistoryCard(item) {
 
   const card = document.createElement("a");
   card.className = "history-card";
+  card.hidden = true;
   card.href = item.url;
   card.target = "_blank";
   card.rel = "noopener noreferrer";
   card.setAttribute("aria-label", `Open ${item.title?.trim() || url.hostname}`);
-  card.hidden = true;
   const imageFrame = document.createElement("div");
   imageFrame.className = "history-image";
   setHistoryPlaceholder(
@@ -577,6 +936,7 @@ function createHistoryCard(item) {
   const status = document.createElement("p");
   status.className = "preview-status";
   status.setAttribute("role", "status");
+
   const cached = previewCache[item.url];
   const cachedMetadata = getFreshPreviewMetadata(item.url);
   if (cachedMetadata) {
@@ -591,6 +951,7 @@ function createHistoryCard(item) {
     status,
     imageUrl: cachedMetadata?.imageUrl ?? null,
     metadataCheckedAt: cachedMetadata?.checkedAt ?? 0,
+    videoUrl: isFreshVideoSourceCheck(cachedMetadata) ? cachedMetadata.videoUrl : null,
     posterVersion: 0,
     videoPage: typeof item.videoPage === "boolean" ? item.videoPage : null
   };
@@ -955,6 +1316,8 @@ async function fillHistoryBatch(targetVisibleCount, includeExisting = false) {
       updateVisibleHistory();
     }
     updateLoadMoreHistoryButton();
+    renderFavoriteSiteVideos();
+    renderRandomVideoSection();
   }
 }
 
@@ -962,6 +1325,860 @@ function renderHistory(items) {
   historyItems = items;
   updateHistoryFilterOptions();
   renderFilteredHistory();
+  renderFavoriteSiteVideos();
+  renderRandomVideoSection();
+}
+
+function getAutomaticVideoItems(items = historyItems) {
+  return items.filter((item) => {
+    const savedPoster = previewCache[item.url];
+    const isVideoPage = getFreshPreviewMetadata(item.url)?.videoPage === true ||
+      savedPoster?.videoPage === true;
+    return isVideoPage &&
+      typeof savedPoster?.dataUrl === "string" &&
+      Number.isFinite(item.lastVisitTime);
+  });
+}
+
+function trimPreviewCache(cache, items = historyItems) {
+  const lastVisits = new Map(items.map((item) => [item.url, item.lastVisitTime ?? 0]));
+  const entries = Object.entries(cache)
+    .map((entry) => ({
+      entry,
+      hostname: getBookmarkedSiteHostname(entry[0]) ||
+        getBookmarkedSiteHostnameFrom(entry[0], favoriteBookmarkedSites) ||
+        getHistoryUrl(entry[0])?.hostname,
+      lastVisitTime: Number.isFinite(lastVisits.get(entry[0]))
+        ? lastVisits.get(entry[0])
+        : null
+    }))
+    .sort((first, second) =>
+      (second.lastVisitTime ?? 0) - (first.lastVisitTime ?? 0)
+    );
+  if (entries.length <= MAX_SAVED_POSTERS) {
+    return cache;
+  }
+  const selected = [];
+  const selectedUrls = new Set();
+  const selectedSites = new Set();
+  const datedEntries = entries.filter((item) => item.lastVisitTime !== null);
+  const selectionPool = datedEntries.length > 0 ? datedEntries : entries;
+  const oldestVisit = Math.min(...selectionPool.map((item) => item.lastVisitTime ?? 0));
+  const newestVisit = Math.max(...selectionPool.map((item) => item.lastVisitTime ?? 0));
+  const visitRange = Math.max(1, newestVisit - oldestVisit + 1);
+  const timeBuckets = Array.from({ length: MAX_SAVED_POSTERS }, () => []);
+  for (const item of selectionPool) {
+    const bucketIndex = Math.min(
+      MAX_SAVED_POSTERS - 1,
+      Math.floor(((item.lastVisitTime ?? 0) - oldestVisit) / visitRange * MAX_SAVED_POSTERS)
+    );
+    timeBuckets[bucketIndex].push(item);
+  }
+  const selectEntry = (item) => {
+    selected.push(item.entry);
+    selectedUrls.add(item.entry[0]);
+    if (item.hostname) {
+      selectedSites.add(item.hostname);
+    }
+  };
+  for (const bucket of timeBuckets) {
+    if (bucket.length === 0) {
+      continue;
+    }
+    const unusedSites = bucket.filter((item) =>
+      item.hostname && !selectedSites.has(item.hostname)
+    );
+    const pool = unusedSites.length > 0 ? unusedSites : bucket;
+    selectEntry(pool[Math.floor(Math.random() * pool.length)]);
+  }
+  while (selected.length < MAX_SAVED_POSTERS) {
+    let remaining = selectionPool.filter((item) => !selectedUrls.has(item.entry[0]));
+    if (remaining.length === 0 && selectionPool !== entries) {
+      remaining = entries.filter((item) => !selectedUrls.has(item.entry[0]));
+    }
+    if (remaining.length === 0) {
+      break;
+    }
+    const unusedSites = remaining.filter((item) =>
+      item.hostname && !selectedSites.has(item.hostname)
+    );
+    const pool = unusedSites.length > 0 ? unusedSites : remaining;
+    selectEntry(pool[Math.floor(Math.random() * pool.length)]);
+  }
+  return Object.fromEntries(selected);
+}
+
+function createAutomaticHistoryCard(item) {
+  const url = getHistoryUrl(item.url);
+  const savedPoster = previewCache[item.url];
+  if (!url || typeof savedPoster?.dataUrl !== "string") {
+    return null;
+  }
+
+  const card = document.createElement("a");
+  card.className = "history-card automatic-history-card";
+  card.href = url.href;
+  card.target = "_blank";
+  card.rel = "noopener noreferrer";
+  const titleText = item.title?.trim() || url.hostname;
+  const lastVisited = new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric"
+  }).format(item.lastVisitTime);
+  card.setAttribute("aria-label", `Open ${titleText}; last visited ${lastVisited}`);
+
+  const imageFrame = document.createElement("div");
+  imageFrame.className = "history-image";
+  const image = document.createElement("img");
+  image.className = "history-thumbnail";
+  image.alt = "";
+  image.src = savedPoster.dataUrl;
+  imageFrame.append(image);
+
+  const content = document.createElement("div");
+  content.className = "history-content";
+  const title = document.createElement("span");
+  title.className = "history-title";
+  title.textContent = titleText;
+  const details = document.createElement("p");
+  details.className = "history-details";
+  details.textContent = `${url.hostname} · ${lastVisited}`;
+  content.append(title, details);
+  card.append(imageFrame, content);
+  return card;
+}
+
+function renderFavoriteSiteVideos() {
+  const sitesInScope = getFavoriteBookmarkedSitesInScope();
+  const groupedItems = new Map(
+    [...sitesInScope.keys()].map((hostname) => [hostname, []])
+  );
+  const siteLastVisits = new Map();
+  for (const item of favoriteSiteHistoryItems) {
+    const hostname = getBookmarkedSiteHostnameFrom(item.url, sitesInScope);
+    if (hostname && Number.isFinite(item.lastVisitTime)) {
+      siteLastVisits.set(
+        hostname,
+        Math.max(siteLastVisits.get(hostname) ?? 0, item.lastVisitTime)
+      );
+    }
+  }
+  for (const item of getAutomaticVideoItems(favoriteSiteHistoryItems)) {
+    const hostname = getBookmarkedSiteHostnameFrom(item.url, sitesInScope);
+    if (hostname && groupedItems.has(hostname)) {
+      groupedItems.get(hostname).push(item);
+    }
+  }
+
+  const sortedGroups = [...groupedItems].sort((first, second) => {
+    const firstHasPreviews = first[1].length > 0;
+    const secondHasPreviews = second[1].length > 0;
+    if (firstHasPreviews !== secondHasPreviews) {
+      return Number(secondHasPreviews) - Number(firstHasPreviews);
+    }
+    const firstLatestVisit = Math.max(
+      siteLastVisits.get(first[0]) ?? 0,
+      ...first[1].map((item) => item.lastVisitTime)
+    );
+    const secondLatestVisit = Math.max(
+      siteLastVisits.get(second[0]) ?? 0,
+      ...second[1].map((item) => item.lastVisitTime)
+    );
+    return secondLatestVisit - firstLatestVisit ||
+      (favoriteBookmarkedSites.get(first[0])?.name ?? first[0]).localeCompare(
+        favoriteBookmarkedSites.get(second[0])?.name ?? second[0]
+      );
+  });
+  const rows = [];
+  for (const [hostname, items] of sortedGroups) {
+    items.sort((first, second) => second.lastVisitTime - first.lastVisitTime);
+    if (items.length === 0) {
+      rows.push({ hostname, items: [] });
+      continue;
+    }
+    for (let index = 0; index < items.length; index += MAX_FAVORITE_SITE_CARDS) {
+      rows.push({
+        hostname,
+        items: items.slice(index, index + MAX_FAVORITE_SITE_CARDS)
+      });
+    }
+  }
+  favoriteSiteRowIndex = Math.min(favoriteSiteRowIndex, Math.max(rows.length - 1, 0));
+  favoriteSitePreviousRowButton.disabled = false;
+  favoriteSiteNextRowButton.disabled = false;
+  favoriteSitePreviousRowButton.hidden = favoriteSiteRowIndex === 0;
+  favoriteSiteNextRowButton.hidden = rows.length < 2 || favoriteSiteRowIndex >= rows.length - 1;
+  favoriteSiteVideos.replaceChildren();
+  if (sitesInScope.size === 0 && bookmarkFolders.length > 0) {
+    const emptyState = document.createElement("p");
+    emptyState.className = "favorite-site-video-empty";
+    emptyState.textContent = "No bookmarked websites found.";
+    favoriteSiteVideos.append(emptyState);
+  } else if (rows.length > 0) {
+    const { hostname, items } = rows[favoriteSiteRowIndex];
+    const siteGroup = document.createElement("section");
+    siteGroup.className = "favorite-site-video-group";
+    const heading = document.createElement("h4");
+    heading.className = "favorite-site-video-heading";
+    heading.textContent = favoriteBookmarkedSites.get(hostname)?.name || hostname;
+    siteGroup.append(heading);
+    if (items.length > 0) {
+      const grid = document.createElement("div");
+      grid.className = "history-grid favorite-site-video-grid";
+      for (const item of items) {
+        const card = createAutomaticHistoryCard(item);
+        if (card) {
+          grid.append(card);
+        }
+      }
+      siteGroup.append(grid);
+    } else {
+      const emptyState = document.createElement("p");
+      emptyState.className = "favorite-site-video-empty";
+      emptyState.textContent = "No saved video previews yet.";
+      siteGroup.append(emptyState);
+    }
+    favoriteSiteVideos.append(siteGroup);
+  } else if (sitesInScope.size > 0) {
+    const emptyState = document.createElement("p");
+    emptyState.className = "favorite-site-video-empty";
+    emptyState.textContent = "No bookmarked sites match the current selection.";
+    favoriteSiteVideos.append(emptyState);
+  }
+  favoriteSiteVideosSection.hidden = bookmarkFolders.length === 0;
+  if (!favoriteSiteVideosSection.hidden) {
+    observeFavoriteSiteVideoSection();
+    if (favoriteSiteVideosAreVisible) {
+      void scanFavoriteSitePreviews();
+    }
+  }
+}
+
+function cancelFavoriteSiteRowTransition() {
+  clearTimeout(favoriteSiteRowTransitionTimer);
+  favoriteSiteRowTransitionTimer = null;
+  favoriteSiteVideos.classList.remove("is-transitioning");
+  favoriteSitePreviousRowButton.disabled = false;
+  favoriteSiteNextRowButton.disabled = false;
+}
+
+function navigateFavoriteSiteRow(direction) {
+  const button = direction < 0
+    ? favoriteSitePreviousRowButton
+    : favoriteSiteNextRowButton;
+  if (button.hidden || favoriteSiteRowTransitionTimer !== null) {
+    return;
+  }
+  favoriteSitePreviousRowButton.disabled = true;
+  favoriteSiteNextRowButton.disabled = true;
+  favoriteSiteVideos.classList.add("is-transitioning");
+  favoriteSiteRowTransitionTimer = setTimeout(() => {
+    favoriteSiteRowTransitionTimer = null;
+    favoriteSiteRowIndex += direction;
+    renderFavoriteSiteVideos();
+    window.requestAnimationFrame(() => {
+      favoriteSiteVideos.classList.remove("is-transitioning");
+    });
+  }, 850);
+}
+
+function observeFavoriteSiteVideoSection() {
+  if ("IntersectionObserver" in window) {
+    if (!favoriteSiteVideoObserver) {
+      favoriteSiteVideoObserver = new IntersectionObserver((entries) => {
+        favoriteSiteVideosAreVisible = entries.some((entry) =>
+          entry.target === favoriteSiteVideosSection && entry.isIntersecting
+        );
+        if (favoriteSiteVideosAreVisible) {
+          void scanFavoriteSitePreviews();
+        }
+      }, { threshold: 0 });
+    }
+    favoriteSiteVideoObserver.observe(favoriteSiteVideosSection);
+    return;
+  }
+  const bounds = favoriteSiteVideosSection.getBoundingClientRect();
+  favoriteSiteVideosAreVisible = bounds.bottom > 0 && bounds.top < window.innerHeight;
+  if (favoriteSiteVideosAreVisible) {
+    void scanFavoriteSitePreviews();
+  }
+}
+
+function getFavoriteSitePreviewAttemptCount(hostname) {
+  return [...favoriteSitePreviewAttempts]
+    .filter((url) => getBookmarkedSiteHostnameFrom(url, favoriteBookmarkedSites) === hostname)
+    .length;
+}
+
+function createFavoriteSitePreviewCard(item) {
+  const metadata = getFreshPreviewMetadata(item.url);
+  const savedPoster = previewCache[item.url];
+  return {
+    item,
+    imageFrame: document.createElement("div"),
+    status: document.createElement("p"),
+    imageUrl: metadata?.imageUrl ?? null,
+    metadataCheckedAt: metadata?.checkedAt ?? 0,
+    videoUrl: isFreshVideoSourceCheck(metadata) ? metadata.videoUrl : null,
+    posterVersion: 0,
+    videoPage: metadata?.videoPage ?? (savedPoster?.videoPage === true ? true : null)
+  };
+}
+
+async function scanFavoriteSitePreviews() {
+  const isSpecificSiteSelected = Boolean(selectedFavoriteSiteHostname);
+  if (favoriteSitePreviewScanInProgress ||
+      !favoriteSiteVideosAreVisible ||
+      document.hidden ||
+      historyInitialBatchLoading ||
+      historyFillInProgress ||
+      !favoriteSiteHistoryReady ||
+      continueSectionCollapsed ||
+      discreetCoverActive ||
+      (!isSpecificSiteSelected &&
+        favoriteSitePreviewAttempts.size >= MAX_FAVORITE_SITE_PREVIEW_CHECKS)) {
+    return;
+  }
+  const sitesInScope = getFavoriteBookmarkedSitesInScope();
+  const itemsBySite = new Map([...sitesInScope.keys()].map((hostname) => [hostname, []]));
+  for (const item of favoriteSiteHistoryItems) {
+    const hostname = getBookmarkedSiteHostnameFrom(item.url, sitesInScope);
+    if (hostname && itemsBySite.has(hostname)) {
+      itemsBySite.get(hostname).push(item);
+    }
+  }
+
+  const cards = [];
+  for (const [hostname, siteItems] of itemsBySite) {
+    const savedCount = getAutomaticVideoItems(favoriteSiteHistoryItems).filter((item) =>
+      getBookmarkedSiteHostnameFrom(item.url, favoriteBookmarkedSites) === hostname
+    ).length;
+    if (savedCount >= 2 ||
+        getFavoriteSitePreviewAttemptCount(hostname) >= MAX_FAVORITE_SITE_PREVIEW_ATTEMPTS_PER_SITE ||
+        (!isSpecificSiteSelected &&
+          favoriteSitePreviewAttempts.size + cards.length >= MAX_FAVORITE_SITE_PREVIEW_CHECKS)) {
+      continue;
+    }
+    const candidate = siteItems
+      .filter((item) =>
+        !previewCache[item.url]?.dataUrl &&
+        !favoriteSitePreviewAttempts.has(item.url) &&
+        getFreshPreviewMetadata(item.url)?.videoPage !== false
+      )
+      .sort((first, second) => {
+        const firstIsKnownVideo = getFreshPreviewMetadata(first.url)?.videoPage === true;
+        const secondIsKnownVideo = getFreshPreviewMetadata(second.url)?.videoPage === true;
+        return Number(secondIsKnownVideo) - Number(firstIsKnownVideo) ||
+          second.lastVisitTime - first.lastVisitTime;
+      })[0];
+    if (candidate) {
+      favoriteSitePreviewAttempts.add(candidate.url);
+      cards.push(createFavoriteSitePreviewCard(candidate));
+    }
+  }
+  if (cards.length === 0) {
+    return;
+  }
+  favoriteSitePreviewScanInProgress = true;
+  try {
+    await loadPagePreviews(cards);
+  } catch (error) {
+    historyStatus.textContent = `Could not load favorite-site previews: ${error.message}`;
+  } finally {
+    favoriteSitePreviewScanInProgress = false;
+    renderFavoriteSiteVideos();
+  }
+}
+
+function renderRandomVideoSection() {
+  const items = getAutomaticVideoItems();
+  randomVideoSection.hidden = items.length === 0;
+  if (items.length === 0) {
+    stopRandomVideoPlayback();
+    clearRandomVideoNavigation();
+    for (const slot of randomVideoSlots) {
+      clearTimeout(slot.transitionTimer);
+      slot.element.classList.remove("is-transitioning");
+      slot.currentItem = null;
+      slot.previousPoster.removeAttribute("src");
+      slot.previousPoster.hidden = true;
+      slot.poster.removeAttribute("src");
+      slot.title.textContent = "";
+      slot.site.textContent = "";
+      slot.element.removeAttribute("href");
+    }
+    return;
+  }
+  if (randomVideoSlots.some((slot) => !items.some((item) => item.url === slot.currentItem?.url))) {
+    stopRandomVideoPlayback();
+    clearRandomVideoNavigation();
+    const pair = getRandomVideoPair(items);
+    randomVideoSlots.forEach((slot, index) => setRandomVideoPosterItem(slot, pair[index]));
+  }
+  randomVideoBackHistory = randomVideoBackHistory.filter((pair) =>
+    isAvailableRandomVideoPair(pair, items) && isUnclickedRandomVideoPair(pair)
+  );
+  randomVideoForwardHistory = randomVideoForwardHistory.filter((pair) =>
+    isAvailableRandomVideoPair(pair, items) && isUnclickedRandomVideoPair(pair)
+  );
+  updateRandomVideoNavigation();
+  observeRandomVideoSection();
+  if (randomVideoIsVisible) {
+    updateRandomVideoPlayback();
+  }
+}
+
+function getCurrentRandomVideoPair() {
+  return randomVideoSlots.map((slot) => slot.currentItem).filter(Boolean);
+}
+
+function sameRandomVideoPair(first, second) {
+  return first.length === second.length &&
+    first.every((item, index) => item.url === second[index]?.url);
+}
+
+function isUnclickedRandomVideoPair(pair) {
+  return pair.length === 2 &&
+    pair.every((item) => !randomVideoClickedUrls.has(item.url));
+}
+
+function isAvailableRandomVideoPair(pair, items = getAutomaticVideoItems()) {
+  return pair.length === 2 &&
+    pair.every((item) =>
+      items.some((candidate) => candidate.url === item.url) &&
+      typeof previewCache[item.url]?.dataUrl === "string"
+    );
+}
+
+function clearRandomVideoNavigation() {
+  randomVideoBackHistory = [];
+  randomVideoForwardHistory = [];
+  randomVideoClickedUrls.clear();
+  randomVideoPlayedUrls.clear();
+  updateRandomVideoNavigation();
+}
+
+function updateRandomVideoNavigation() {
+  randomVideoBackButton.disabled = randomVideoBackHistory.length === 0;
+  randomVideoForwardButton.disabled = randomVideoForwardHistory.length === 0 &&
+    getAutomaticVideoItems().length < 2;
+}
+
+function rememberRandomVideoPair(pair) {
+  const currentPair = getCurrentRandomVideoPair();
+  if (!isUnclickedRandomVideoPair(currentPair) ||
+      sameRandomVideoPair(currentPair, pair)) {
+    return;
+  }
+  randomVideoBackHistory.push(currentPair);
+  if (randomVideoBackHistory.length > MAX_RANDOM_VIDEO_HISTORY) {
+    randomVideoBackHistory.shift();
+  }
+  randomVideoForwardHistory = [];
+}
+
+function handleRandomVideoSlotClick(event) {
+  if (event.defaultPrevented || event.button !== 0) {
+    return;
+  }
+  const slot = randomVideoSlots.find((candidate) => candidate.element === event.currentTarget);
+  const url = slot?.currentItem?.url;
+  if (!url) {
+    return;
+  }
+  randomVideoClickedUrls.add(url);
+  randomVideoBackHistory = randomVideoBackHistory.filter((pair) =>
+    pair.every((item) => item.url !== url)
+  );
+  randomVideoForwardHistory = randomVideoForwardHistory.filter((pair) =>
+    pair.every((item) => item.url !== url)
+  );
+  updateRandomVideoNavigation();
+}
+
+function navigateRandomVideo(direction) {
+  stopRandomVideoPlayback();
+  const currentPair = getCurrentRandomVideoPair();
+  const targetHistory = direction === "back"
+    ? randomVideoBackHistory
+    : randomVideoForwardHistory;
+  let targetPair = null;
+  while (targetHistory.length > 0 && !targetPair) {
+    const candidate = targetHistory.pop();
+    if (isUnclickedRandomVideoPair(candidate) &&
+        isAvailableRandomVideoPair(candidate)) {
+      targetPair = candidate;
+    }
+  }
+  if (!targetPair && direction === "forward") {
+    updateRandomVideoNavigation();
+    void playRandomVideoPair(true);
+    return;
+  }
+  if (targetPair) {
+    if (isUnclickedRandomVideoPair(currentPair)) {
+      const returnHistory = direction === "back"
+        ? randomVideoForwardHistory
+        : randomVideoBackHistory;
+      returnHistory.push(currentPair);
+      if (returnHistory.length > MAX_RANDOM_VIDEO_HISTORY) {
+        returnHistory.shift();
+      }
+    }
+    targetPair.forEach((item) => randomVideoPlayedUrls.add(item.url));
+    randomVideoSlots.forEach((slot, index) => setRandomVideoPosterItem(slot, targetPair[index]));
+  }
+  updateRandomVideoNavigation();
+  void playRandomVideoPair(false);
+}
+
+function getRandomVideoPair(items) {
+  const unseenItems = items.filter((item) => !randomVideoPlayedUrls.has(item.url));
+  const pool = unseenItems.length >= 2
+    ? unseenItems
+    : unseenItems.length === 1
+      ? [...unseenItems, ...items.filter((item) => item.url !== unseenItems[0].url)]
+      : items;
+  const firstUrl = randomVideoSlots[0].currentItem?.url;
+  const secondUrl = randomVideoSlots[1].currentItem?.url;
+  const pairs = [];
+  for (const first of pool) {
+    for (const second of pool) {
+      if (first.url !== second.url ||
+          (items.length === 1 && first.url === second.url)) {
+        const includesUnseen = unseenItems.length !== 1 ||
+          first.url === unseenItems[0].url ||
+          second.url === unseenItems[0].url;
+        if (includesUnseen &&
+            (first.url !== firstUrl || second.url !== secondUrl || items.length === 1)) {
+          pairs.push([first, second]);
+        }
+      }
+    }
+  }
+  const pair = pairs.length > 0
+    ? pairs[Math.floor(Math.random() * pairs.length)]
+    : items.length === 1
+      ? [items[0], items[0]]
+      : [items[1], items[0]];
+  for (const item of pair) {
+    randomVideoPlayedUrls.add(item.url);
+  }
+  if (randomVideoPlayedUrls.size >= items.length) {
+    randomVideoPlayedUrls.clear();
+    for (const item of pair) {
+      randomVideoPlayedUrls.add(item.url);
+    }
+  }
+  return pair;
+}
+
+function setRandomVideoPosterItem(slot, item) {
+  clearTimeout(slot.transitionTimer);
+  slot.element.classList.remove("is-transitioning");
+  slot.previousPoster.hidden = true;
+  const previousItem = slot.currentItem;
+  const previousPoster = previousItem ? previewCache[previousItem.url]?.dataUrl : null;
+  const shouldTransition = previousItem?.url !== item.url && Boolean(previousPoster);
+  if (shouldTransition) {
+    slot.previousPoster.src = previousPoster;
+    slot.previousPoster.hidden = false;
+  }
+  slot.currentItem = item;
+  const url = getHistoryUrl(item.url);
+  slot.element.href = url.href;
+  slot.element.setAttribute("aria-label", `Open video preview: ${item.title?.trim() || url.hostname}`);
+  slot.poster.src = previewCache[item.url].dataUrl;
+  slot.poster.hidden = false;
+  slot.title.textContent = item.title?.trim() || url?.hostname || "";
+  slot.site.textContent = url?.hostname || "";
+  if (shouldTransition) {
+    void slot.element.offsetWidth;
+    slot.element.classList.add("is-transitioning");
+    slot.transitionTimer = setTimeout(() => {
+      if (slot.currentItem?.url === item.url) {
+        slot.element.classList.remove("is-transitioning");
+        slot.previousPoster.hidden = true;
+      }
+    }, 1900);
+  }
+}
+
+function observeRandomVideoSection() {
+  if ("IntersectionObserver" in window && !randomVideoObserver) {
+    randomVideoObserver = new IntersectionObserver(() => {
+      updateRandomVideoVisibility();
+    }, { threshold: 0 });
+    randomVideoObserver.observe(randomVideoSection);
+  }
+  if (!randomVideoVisibilityEventsAttached) {
+    window.addEventListener("scroll", updateRandomVideoVisibility, { passive: true });
+    window.addEventListener("resize", updateRandomVideoVisibility);
+    randomVideoVisibilityEventsAttached = true;
+  }
+  updateRandomVideoVisibility();
+}
+
+function updateRandomVideoVisibility() {
+  const bounds = randomVideoSection.getBoundingClientRect();
+  randomVideoIsVisible = !randomVideoSection.hidden &&
+    !continueContent.hidden &&
+    bounds.bottom > 0 &&
+    bounds.top < window.innerHeight;
+  updateRandomVideoPlayback();
+}
+
+function handleReducedMotionChange() {
+  if (reducedMotionPreference.matches) {
+    for (const slot of randomVideoSlots) {
+      slot.player.pause();
+      slot.player.removeAttribute("src");
+      slot.player.load();
+      slot.player.hidden = true;
+      slot.poster.hidden = false;
+    }
+  }
+  updateRandomVideoVisibility();
+}
+
+function isFreshVideoSourceCheck(metadata, now = Date.now()) {
+  return Number.isFinite(metadata?.videoCheckedAt) &&
+    metadata.videoCheckedAt <= now &&
+    now - metadata.videoCheckedAt < PREVIEW_METADATA_TTL_MS;
+}
+
+async function scanRandomVideoSources() {
+  if (randomVideoSourceScanInProgress) {
+    return;
+  }
+  randomVideoSourceScanInProgress = true;
+  randomVideoStatus.textContent = "Checking bookmarked pages for direct video clips…";
+  let changed = false;
+  let failedCount = 0;
+  let permissionSkippedCount = 0;
+  const candidates = getAutomaticVideoItems()
+    .filter((item) =>
+      !randomVideoSourceAttempts.has(item.url) &&
+      !isFreshVideoSourceCheck(getFreshPreviewMetadata(item.url))
+    )
+    .sort((first, second) => second.lastVisitTime - first.lastVisitTime)
+    .slice(0, MAX_RANDOM_VIDEO_SOURCE_SCANS);
+  try {
+    await forEachWithConcurrency(candidates, 2, async (item) => {
+      if (!canPlayRandomVideo() || reducedMotionPreference.matches) {
+        return;
+      }
+      let permitted;
+      try {
+        permitted = await hasOriginPermission(item.url);
+      } catch {
+        randomVideoSourceAttempts.add(item.url);
+        failedCount += 1;
+        return;
+      }
+      if (!canPlayRandomVideo() || reducedMotionPreference.matches) {
+        return;
+      }
+      randomVideoSourceAttempts.add(item.url);
+      if (!permitted) {
+        permissionSkippedCount += 1;
+        return;
+      }
+      try {
+        const response = await fetchPreviewResponse(item.url, MAX_HTML_BYTES, "text/html");
+        const html = new TextDecoder().decode(response.bytes);
+        const document = new DOMParser().parseFromString(html, "text/html");
+        const metadata = getFreshPreviewMetadata(item.url) ?? {
+          videoPage: true,
+          imageUrl: null,
+          checkedAt: Date.now(),
+          classificationVersion: PREVIEW_CLASSIFICATION_VERSION
+        };
+        metadata.videoUrl = findDirectVideoUrl(document, response.responseUrl || item.url);
+        metadata.videoCheckedAt = Date.now();
+        previewMetadataCache[item.url] = metadata;
+        changed = true;
+      } catch {
+        failedCount += 1;
+      }
+    });
+    if (changed) {
+      await savePreviewMetadataCache();
+      randomVideoPermittedUrls.clear();
+    }
+    const hasDirectClip = getAutomaticVideoItems().some((item) => {
+      const metadata = getFreshPreviewMetadata(item.url);
+      return isFreshVideoSourceCheck(metadata) && typeof metadata.videoUrl === "string";
+    });
+    randomVideoStatus.textContent = failedCount > 0
+      ? "Some clip sources could not be checked; saved posters will be used where needed."
+      : hasDirectClip
+        ? ""
+        : permissionSkippedCount > 0
+          ? "Some pages need site access before clips can be checked; saved posters will keep rotating."
+          : "No playable direct clips were found; saved posters will keep rotating.";
+  } catch (error) {
+    randomVideoStatus.textContent = `Could not check clip sources: ${error.message}`;
+  } finally {
+    randomVideoSourceScanInProgress = false;
+    updateRandomVideoPlayback();
+  }
+}
+
+function canPlayRandomVideo() {
+  return randomVideoIsVisible &&
+    !document.hidden &&
+    !discreetCoverActive &&
+    !randomVideoSection.hidden;
+}
+
+function needsRandomVideoSourceCheck() {
+  return getAutomaticVideoItems().some((item) =>
+    !randomVideoSourceAttempts.has(item.url) &&
+    !isFreshVideoSourceCheck(getFreshPreviewMetadata(item.url))
+  );
+}
+
+function stopRandomVideoPlayback() {
+  clearTimeout(randomVideoTimer);
+  randomVideoTimer = null;
+  for (const slot of randomVideoSlots) {
+    slot.player.pause();
+    slot.player.removeAttribute("src");
+    slot.player.load();
+    slot.player.hidden = true;
+    if (slot.currentItem && previewCache[slot.currentItem.url]?.dataUrl) {
+      slot.poster.hidden = false;
+    }
+  }
+}
+
+function updateRandomVideoPlayback() {
+  if (!canPlayRandomVideo()) {
+    stopRandomVideoPlayback();
+    return;
+  }
+  if (!reducedMotionPreference.matches &&
+      !randomVideoSourceScanInProgress &&
+      needsRandomVideoSourceCheck()) {
+    void scanRandomVideoSources();
+  }
+  if (randomVideoTimer === null) {
+    void playRandomVideoPair(false);
+  }
+}
+
+function scheduleRandomVideoAdvance() {
+  if (!canPlayRandomVideo()) {
+    return;
+  }
+  randomVideoTimer = setTimeout(() => {
+    randomVideoTimer = null;
+    void playRandomVideoPair(true);
+  }, RANDOM_VIDEO_DURATION_MS);
+}
+
+async function hasRandomVideoPermission(url) {
+  if (randomVideoPermittedUrls.has(url)) {
+    return true;
+  }
+  if (!await hasOriginPermission(url)) {
+    return false;
+  }
+  randomVideoPermittedUrls.add(url);
+  return true;
+}
+
+async function showRandomVideoInSlot(slot, item) {
+  const metadata = getFreshPreviewMetadata(item.url);
+  const videoUrl = !reducedMotionPreference.matches &&
+    isFreshVideoSourceCheck(metadata)
+    ? metadata.videoUrl
+    : null;
+  slot.player.pause();
+  slot.player.removeAttribute("src");
+  slot.player.load();
+  slot.player.hidden = true;
+  slot.poster.hidden = false;
+  if (typeof videoUrl !== "string" || !canPlayRandomVideo()) {
+    return;
+  }
+  try {
+    const hasPermission = await hasRandomVideoPermission(videoUrl);
+    if (slot.currentItem?.url !== item.url || !canPlayRandomVideo()) {
+      return;
+    }
+    if (!hasPermission) {
+      randomVideoStatus.textContent = "A clip host does not have permission; showing its saved poster.";
+      return;
+    }
+
+    slot.player.crossOrigin = "anonymous";
+    slot.player.referrerPolicy = "no-referrer";
+    slot.player.muted = true;
+    slot.player.playsInline = true;
+    slot.player.preload = "metadata";
+    slot.player.onerror = () => {
+      if (slot.currentItem?.url !== item.url) {
+        return;
+      }
+      slot.player.pause();
+      slot.player.hidden = true;
+      slot.poster.hidden = false;
+      randomVideoStatus.textContent = "A clip could not play; showing its saved poster instead.";
+    };
+    slot.player.onloadeddata = () => {
+      if (slot.currentItem?.url === item.url && canPlayRandomVideo()) {
+        slot.poster.hidden = true;
+      }
+    };
+    slot.player.hidden = false;
+    slot.player.src = videoUrl;
+    void slot.player.play().catch(() => {
+      if (slot.currentItem?.url !== item.url || slot.player.src !== videoUrl) {
+        return;
+      }
+      slot.player.hidden = true;
+      slot.poster.hidden = false;
+      randomVideoStatus.textContent = "A clip could not play; showing its saved poster instead.";
+    });
+  } catch (error) {
+    randomVideoStatus.textContent = `Could not prepare a video preview: ${error.message}`;
+  }
+}
+
+async function playRandomVideoPair(advance) {
+  if (randomVideoAdvancePending || !canPlayRandomVideo()) {
+    return;
+  }
+  randomVideoAdvancePending = true;
+  try {
+    const items = getAutomaticVideoItems();
+    if (items.length === 0) {
+      return;
+    }
+    if (advance ||
+        randomVideoSlots.some((slot) => !items.some((item) => item.url === slot.currentItem?.url))) {
+      const pair = getRandomVideoPair(items);
+      if (advance) {
+        rememberRandomVideoPair(pair);
+      }
+      randomVideoSlots.forEach((slot, index) => setRandomVideoPosterItem(slot, pair[index]));
+      updateRandomVideoNavigation();
+    }
+    await Promise.all(randomVideoSlots.map((slot) =>
+      showRandomVideoInSlot(slot, slot.currentItem)
+    ));
+    scheduleRandomVideoAdvance();
+  } catch (error) {
+    randomVideoStatus.textContent = `Could not prepare the random previews: ${error.message}`;
+    scheduleRandomVideoAdvance();
+  } finally {
+    randomVideoAdvancePending = false;
+    if (randomVideoTimer === null && canPlayRandomVideo()) {
+      void playRandomVideoPair(false);
+    }
+  }
 }
 
 function hideHistoryHoverPreview() {
@@ -1335,20 +2552,50 @@ function updateHistorySearchCursor(items, previousEndTime = null) {
   historyOlderEndTime = oldestVisitTime + 1;
 }
 
-function normalizeHistorySnapshotItems(items) {
+function normalizeHistorySnapshotItems(items, sites = bookmarkedSites) {
   return items
     .filter((item) =>
       item &&
       typeof item.url === "string" &&
       getHistoryUrl(item.url) &&
       Number.isFinite(item.lastVisitTime) &&
-      isBookmarkedWebsite(item.url)
+      getBookmarkedSiteHostnameFrom(item.url, sites)
     )
     .map((item) => ({
       url: item.url,
       title: typeof item.title === "string" ? item.title : "",
       lastVisitTime: item.lastVisitTime
     }));
+}
+
+async function loadFavoriteSiteHistory() {
+  const loadVersion = ++favoriteSiteHistoryLoadVersion;
+  favoriteSiteHistoryReady = false;
+  favoriteSiteStatus.textContent = "Reading history from bookmarked sites…";
+  if (favoriteBookmarkedSites.size === 0) {
+    favoriteSiteHistoryItems = [];
+  } else {
+    const items = await browser.history.search({
+      text: "",
+      startTime: 0,
+      maxResults: MAX_HISTORY_RESULTS
+    });
+    if (loadVersion !== favoriteSiteHistoryLoadVersion) {
+      return;
+    }
+    favoriteSiteHistoryItems = normalizeHistorySnapshotItems(items, favoriteBookmarkedSites);
+  }
+  if (loadVersion !== favoriteSiteHistoryLoadVersion) {
+    return;
+  }
+  favoriteSiteHistoryReady = true;
+  const selectedSite = favoriteBookmarkedSites.get(selectedFavoriteSiteHostname);
+  favoriteSiteStatus.textContent = favoriteBookmarkedSites.size === 0
+    ? "No bookmarked websites were found."
+    : favoriteSiteHistoryItems.length === 0
+      ? `No recent history from ${selectedSite?.name ?? "your bookmarked sites"}.`
+      : "";
+  renderFavoriteSiteVideos();
 }
 
 async function loadOlderHistoryPage() {
@@ -1375,9 +2622,21 @@ async function loadOlderHistoryPage() {
   }
   olderPages.sort((a, b) => (b.lastVisitTime ?? 0) - (a.lastVisitTime ?? 0));
   historyItems.push(...olderPages);
+  if (favoriteSiteHistoryReady) {
+    const knownFavoriteUrls = new Set(favoriteSiteHistoryItems.map((item) => item.url));
+    for (const item of normalizeHistorySnapshotItems(items, favoriteBookmarkedSites)) {
+      if (!knownFavoriteUrls.has(item.url)) {
+        knownFavoriteUrls.add(item.url);
+        favoriteSiteHistoryItems.push(item);
+      }
+    }
+    favoriteSiteHistoryItems.sort((first, second) => second.lastVisitTime - first.lastVisitTime);
+  }
   updateHistoryFilterOptions();
   updateHistoryFilterStatus();
   updateLoadMoreHistoryButton();
+  renderFavoriteSiteVideos();
+  renderRandomVideoSection();
   renderFavoriteHistory(historyItems);
   return items.length > 0;
 }
@@ -1412,8 +2671,17 @@ async function loadRecentHistoryData() {
     "historySnapshot",
     "historySnapshotNeedsRefresh",
     "previewCache",
-    "previewMetadataCache"
+    "previewMetadataCache",
+    "historyTags"
   ]);
+  let storageWarning = "";
+  if (saved.historyTags !== undefined) {
+    try {
+      await browser.storage.local.remove("historyTags");
+    } catch (error) {
+      storageWarning = `Could not remove old personal tags from this device: ${error.message}`;
+    }
+  }
   const snapshotKey = getHistorySnapshotKey();
   const savedSnapshot = saved.historySnapshot;
   const now = Date.now();
@@ -1444,14 +2712,8 @@ async function loadRecentHistoryData() {
       validCache[url] = entry;
     }
   }
-  const cachedUrls = Object.keys(validCache);
-  if (cachedUrls.length > MAX_SAVED_POSTERS) {
-    for (const staleUrl of cachedUrls.slice(0, cachedUrls.length - MAX_SAVED_POSTERS)) {
-      delete validCache[staleUrl];
-    }
-  }
-  const cacheWasPruned = Object.keys(savedCache).length !== Object.keys(validCache).length;
-  previewCache = validCache;
+  previewCache = trimPreviewCache(validCache, cachedSnapshotItems);
+  const cacheWasPruned = Object.keys(savedCache).length !== Object.keys(previewCache).length;
   const savedMetadataCache = saved.previewMetadataCache &&
     typeof saved.previewMetadataCache === "object" &&
     !Array.isArray(saved.previewMetadataCache)
@@ -1460,13 +2722,30 @@ async function loadRecentHistoryData() {
   const validMetadataCache = {};
   for (const [url, entry] of Object.entries(savedMetadataCache)) {
     if (isValidPreviewMetadata(url, entry, now)) {
-      validMetadataCache[url] = entry;
+      const metadata = {
+        videoPage: entry.videoPage,
+        imageUrl: entry.imageUrl,
+        checkedAt: entry.checkedAt
+      };
+      if (entry.classificationVersion === PREVIEW_CLASSIFICATION_VERSION) {
+        metadata.classificationVersion = entry.classificationVersion;
+      }
+      if (Number.isFinite(entry.videoCheckedAt)) {
+        metadata.videoUrl = entry.videoUrl ?? null;
+        metadata.videoCheckedAt = entry.videoCheckedAt;
+      }
+      validMetadataCache[url] = metadata;
     }
   }
   previewMetadataCache = validMetadataCache;
   trimPreviewMetadataCache();
   const metadataCacheWasPruned =
-    Object.keys(savedMetadataCache).length !== Object.keys(previewMetadataCache).length;
+    Object.keys(savedMetadataCache).length !== Object.keys(previewMetadataCache).length ||
+    Object.values(savedMetadataCache).some((entry) =>
+      entry && Object.keys(entry).some((key) =>
+        !["videoPage", "imageUrl", "checkedAt", "classificationVersion", "videoUrl", "videoCheckedAt"].includes(key)
+      )
+    );
 
   let queryStartedAt = Date.now();
   let completedFullSync = !canIncrementallyUpdate;
@@ -1547,12 +2826,14 @@ async function loadRecentHistoryData() {
   if (metadataCacheWasPruned) {
     storageUpdates.previewMetadataCache = previewMetadataCache;
   }
-  let storageWarning = "";
   try {
     await browser.storage.local.set(storageUpdates);
     historySnapshotNeedsRefresh = false;
   } catch (error) {
-    storageWarning = `Could not save local reload data: ${error.message}`;
+    storageWarning = [
+      storageWarning,
+      `Could not save local reload data: ${error.message}`
+    ].filter(Boolean).join(" ");
   }
   historyInitialBatchLoading = true;
   renderHistory(recentPages);
@@ -1565,6 +2846,7 @@ async function loadRecentHistoryData() {
   } finally {
     historyInitialBatchLoading = false;
     updateVisibleHistory();
+    renderFavoriteSiteVideos();
     renderFavoriteHistory(historyItems);
     if (storageWarning) {
       historyStatus.textContent = storageWarning;
@@ -1573,10 +2855,16 @@ async function loadRecentHistoryData() {
 }
 
 function loadHistoryAfterBookmarks() {
-  return loadRecentHistory().catch((error) => {
-    historyStatus.textContent = `Could not read recent history: ${error.message}`;
-    loadPreviewsButton.disabled = true;
-  });
+  favoriteSiteHistoryReady = false;
+  return loadRecentHistory()
+    .catch((error) => {
+      historyStatus.textContent = `Could not read recent history: ${error.message}`;
+      loadPreviewsButton.disabled = true;
+    })
+    .then(() => loadFavoriteSiteHistory())
+    .catch((error) => {
+      favoriteSiteStatus.textContent = `Could not read favorite-site history: ${error.message}`;
+    });
 }
 
 async function readLimitedResponse(response, maxBytes) {
@@ -1664,6 +2952,33 @@ function hasVideoObject(value) {
   return Object.values(value).some(hasVideoObject);
 }
 
+function getVideoObjectThumbnailUrls(value, thumbnails = []) {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      getVideoObjectThumbnailUrls(entry, thumbnails);
+    }
+    return thumbnails;
+  }
+  if (!value || typeof value !== "object") {
+    return thumbnails;
+  }
+  const types = Array.isArray(value["@type"]) ? value["@type"] : [value["@type"]];
+  if (types.some((type) => typeof type === "string" && /(?:^|[/#])videoobject$/i.test(type))) {
+    const values = Array.isArray(value.thumbnailUrl) ? value.thumbnailUrl : [value.thumbnailUrl];
+    for (const thumbnail of values) {
+      if (typeof thumbnail === "string") {
+        thumbnails.push(thumbnail);
+      } else if (thumbnail && typeof thumbnail.url === "string") {
+        thumbnails.push(thumbnail.url);
+      }
+    }
+  }
+  for (const entry of Object.values(value)) {
+    getVideoObjectThumbnailUrls(entry, thumbnails);
+  }
+  return thumbnails;
+}
+
 function isIndividualVideoPage(document, pageUrl) {
   const openGraphType = document
     .querySelector('meta[property="og:type"]')
@@ -1713,7 +3028,11 @@ function isIndividualVideoPage(document, pageUrl) {
       !categorySegments.has(pluralVideoRoute[1])) {
     return true;
   }
-  return /[?&](?:viewkey|video_id|videoid|watch|v)=([^&]{3,})/i.test(query);
+  return /\/(?:video|clip|movie)[._-]?\d{4,}(?:\/|$)/i.test(path) ||
+    /[?&](?:viewkey|video_id|videoid|watch|v)=([^&]{3,})/i.test(query) ||
+    Boolean(document.querySelector(
+      "video[src], video[poster], video[data-src], video source[src], video source[data-src]"
+    ));
 }
 
 function findPageImageUrl(document, baseUrl) {
@@ -1727,28 +3046,57 @@ function findPageImageUrl(document, baseUrl) {
       selector: 'meta[name="twitter:image"], meta[name="twitter:image:src"]',
       widthSelector: 'meta[name="twitter:image:width"]',
       heightSelector: 'meta[name="twitter:image:height"]'
+    },
+    {
+      selector: 'meta[itemprop="thumbnailUrl"], meta[name="thumbnail"]',
+      widthSelector: "",
+      heightSelector: ""
     }
   ];
   const candidates = [];
+  const addCandidate = (value, score = 0) => {
+    if (!value) {
+      return;
+    }
+    try {
+      const imageUrl = getHistoryUrl(new URL(value, baseUrl).href);
+      if (imageUrl) {
+        candidates.push({ url: imageUrl.href, score });
+      }
+    } catch {
+      return;
+    }
+  };
   for (const metadata of imageMetadata) {
-    const width = Number(document.querySelector(metadata.widthSelector)?.getAttribute("content"));
-    const height = Number(document.querySelector(metadata.heightSelector)?.getAttribute("content"));
+    const width = Number(metadata.widthSelector
+      ? document.querySelector(metadata.widthSelector)?.getAttribute("content")
+      : 0);
+    const height = Number(metadata.heightSelector
+      ? document.querySelector(metadata.heightSelector)?.getAttribute("content")
+      : 0);
     const declaredSize = Number.isFinite(width) && width > 0
       ? width * (Number.isFinite(height) && height > 0 ? height : 1)
       : 0;
     for (const meta of document.querySelectorAll(metadata.selector)) {
       const content = meta.getAttribute("content")?.trim();
-      if (!content) {
-        continue;
+      addCandidate(content, declaredSize);
+    }
+  }
+  for (const video of document.querySelectorAll("video[poster]")) {
+    addCandidate(video.getAttribute("poster"));
+  }
+  for (const link of document.querySelectorAll(
+    'link[rel="image_src"][href], link[itemprop="thumbnailUrl"][href]'
+  )) {
+    addCandidate(link.getAttribute("href"));
+  }
+  for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+    try {
+      for (const thumbnail of getVideoObjectThumbnailUrls(JSON.parse(script.textContent))) {
+        addCandidate(thumbnail);
       }
-      try {
-        const imageUrl = getHistoryUrl(new URL(content, baseUrl).href);
-        if (imageUrl) {
-          candidates.push({ url: imageUrl.href, score: declaredSize });
-        }
-      } catch {
-        continue;
-      }
+    } catch {
+      continue;
     }
   }
   candidates.sort((left, right) => right.score - left.score);
@@ -1763,10 +3111,38 @@ function findPagePreviewImageUrl(html, baseUrl) {
   return findPageImageUrl(document, baseUrl);
 }
 
+function findDirectVideoUrl(document, baseUrl) {
+  const sources = document.querySelectorAll(
+    "video[src], video source[src], video[data-src], video source[data-src]"
+  );
+  for (const source of sources) {
+    const sourceValue = source.getAttribute("src") || source.getAttribute("data-src");
+    if (!sourceValue) {
+      continue;
+    }
+    try {
+      const videoUrl = getHistoryUrl(new URL(sourceValue, baseUrl).href);
+      if (!videoUrl || !isSafeVideoSourceUrl(videoUrl.href)) {
+        continue;
+      }
+      const mediaType = source.getAttribute("type")?.split(";")[0].trim().toLowerCase() || "";
+      const hasPlayableType = /^video\/(mp4|webm|ogg|x-m4v)$/.test(mediaType);
+      const hasPlayableExtension = /\.(mp4|m4v|webm|ogv|ogg)$/i.test(videoUrl.pathname);
+      if (hasPlayableType || hasPlayableExtension) {
+        return videoUrl.href;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 function findThumbnailUrl(html, baseUrl, onVideoPageDetected) {
   const document = new DOMParser().parseFromString(html, "text/html");
   const isVideoPage = isIndividualVideoPage(document, baseUrl);
-  onVideoPageDetected(isVideoPage);
+  const videoUrl = isVideoPage ? findDirectVideoUrl(document, baseUrl) : null;
+  onVideoPageDetected(isVideoPage, videoUrl);
   if (!isVideoPage) {
     throw new Error("This page does not appear to be an individual video.");
   }
@@ -1925,23 +3301,29 @@ async function loadPagePreviews(cards = historyCards) {
     try {
       const response = await fetchPreviewResponse(card.item.url, MAX_HTML_BYTES, "text/html");
       const html = new TextDecoder().decode(response.bytes);
-      card.imageUrl = findThumbnailUrl(
+      const imageUrl = findThumbnailUrl(
         html,
         response.responseUrl || card.item.url,
-        (isVideoPage) => {
+        (isVideoPage, videoUrl) => {
           card.videoPage = isVideoPage;
           card.item.videoPage = isVideoPage;
+          card.videoUrl = videoUrl;
           card.metadataCheckedAt = Date.now();
           previewMetadataCache[card.item.url] = {
             videoPage: isVideoPage,
             imageUrl: null,
-            checkedAt: card.metadataCheckedAt
+            checkedAt: card.metadataCheckedAt,
+            classificationVersion: PREVIEW_CLASSIFICATION_VERSION,
+            videoUrl,
+            videoCheckedAt: card.metadataCheckedAt
           };
           metadataChanged = true;
+          updateHistoryFilterOptions();
           updateHistoryFilterStatus();
           updateVisibleHistory();
         }
       );
+      card.imageUrl = imageUrl;
       const metadata = previewMetadataCache[card.item.url];
       if (metadata?.checkedAt === card.metadataCheckedAt) {
         metadata.imageUrl = card.imageUrl;
@@ -1969,6 +3351,8 @@ async function loadPagePreviews(cards = historyCards) {
   if (permittedImageCards.length > 0) {
     await loadAvailableThumbnails(permittedImageCards);
   }
+  renderFavoriteSiteVideos();
+  renderRandomVideoSection();
 
   const permissionNeeded = pagesWithoutPermission > 0 || imagesWithoutPermission > 0;
   if (permissionNeeded) {
@@ -2025,17 +3409,12 @@ async function loadAvailableThumbnails(cards) {
       };
     }
   }
-  const cachedUrls = Object.keys(nextCache);
-  if (cachedUrls.length > MAX_SAVED_POSTERS) {
-    for (const staleUrl of cachedUrls.slice(0, cachedUrls.length - MAX_SAVED_POSTERS)) {
-      delete nextCache[staleUrl];
-    }
-  }
+  const trimmedCache = trimPreviewCache(nextCache);
   let savedLocally = true;
   if (loadedCount > 0) {
+    previewCache = trimmedCache;
     try {
-      await browser.storage.local.set({ previewCache: nextCache });
-      previewCache = nextCache;
+      await browser.storage.local.set({ previewCache: trimmedCache });
     } catch (error) {
       savedLocally = false;
       historyStatus.textContent = `Previews are showing, but could not save them for next time: ${error.message}`;
@@ -2060,15 +3439,32 @@ async function loadAvailableThumbnails(cards) {
 }
 
 async function loadBookmarks() {
+  cancelFavoriteSiteRowTransition();
   bookmarkStatus.textContent = "Reading your Firefox bookmarks…";
+  favoriteSiteHistoryReady = false;
+  favoriteSiteHistoryLoadVersion += 1;
   const [tree, saved] = await Promise.all([
     withTimeout(
       browser.bookmarks.getTree(),
       BOOKMARKS_TIMEOUT_MS,
       "Firefox bookmarks did not respond within 5 seconds."
     ),
-    browser.storage.local.get(["bookmarkFolderIds", "bookmarkFolderId", "faviconCache"])
+    browser.storage.local.get([
+      "bookmarkFolderIds",
+      "bookmarkFolderId",
+      "favoriteSiteHostname",
+      "faviconCache",
+      "shortcutPreferences",
+      "continueSectionCollapsed"
+    ])
   ]);
+  shortcutPreferences = saved.shortcutPreferences &&
+    typeof saved.shortcutPreferences === "object" &&
+    !Array.isArray(saved.shortcutPreferences)
+    ? saved.shortcutPreferences
+    : {};
+  continueSectionCollapsed = saved.continueSectionCollapsed === true;
+  updateContinueSection();
   const savedFavicons = saved.faviconCache && typeof saved.faviconCache === "object" && !Array.isArray(saved.faviconCache)
     ? saved.faviconCache
     : {};
@@ -2121,6 +3517,24 @@ async function loadBookmarks() {
     : null;
   bookmarkGroups = selectedFolder ? [getBookmarkGroup(selectedFolder)] : [];
   bookmarkedSites = getBookmarkedSites(bookmarkGroups.flatMap((group) => group.items));
+  const allFavoriteBookmarkItems = bookmarkFolders.flatMap((folder) => {
+    const node = findBookmarkFolder(root, folder.id);
+    return node ? getBookmarkGroup(node).items : [];
+  });
+  favoriteBookmarkedSites = getBookmarkedSites(allFavoriteBookmarkItems);
+  selectedFavoriteSiteHostname = typeof saved.favoriteSiteHostname === "string" &&
+    favoriteBookmarkedSites.has(saved.favoriteSiteHostname)
+    ? saved.favoriteSiteHostname
+    : "";
+  if (saved.favoriteSiteHostname !== selectedFavoriteSiteHostname) {
+    await browser.storage.local.set({ favoriteSiteHostname: selectedFavoriteSiteHostname });
+  }
+  renderFavoriteSiteOptions();
+  favoriteSiteRowIndex = 0;
+  favoriteSitePreviewAttempts.clear();
+  favoriteSiteHistoryLoadVersion += 1;
+  favoriteSiteHistoryItems = [];
+  favoriteSiteStatus.textContent = "";
   const allowedHistoryItems = historyItems.filter((item) => isBookmarkedWebsite(item.url));
   const historyItemsChanged = allowedHistoryItems.length !== historyItems.length ||
     allowedHistoryItems.some((item, index) => item.url !== historyItems[index]?.url);
@@ -2128,6 +3542,7 @@ async function loadBookmarks() {
   if (historyItemsChanged) {
     renderHistory(allowedHistoryItems);
   }
+  renderFavoriteSiteVideos();
   renderBookmarks(bookmarkGroups);
   bookmarkStatus.textContent = "";
 }
@@ -2159,6 +3574,53 @@ function scheduleHistoryReconciliation() {
   }, 100);
 }
 
+discreetModeToggleButton.addEventListener("click", async () => {
+  discreetModeToggleButton.disabled = true;
+  historyStatus.textContent = "";
+  try {
+    await setDiscreetCover(true);
+  } catch (error) {
+    historyStatus.textContent = `Could not cover Joydash: ${error.message}`;
+  } finally {
+    discreetModeToggleButton.disabled = false;
+  }
+});
+
+revealDiscreetCoverButton.addEventListener("click", async () => {
+  revealDiscreetCoverButton.disabled = true;
+  try {
+    await setDiscreetCover(false);
+  } catch (error) {
+    discreetCoverStatus.textContent = `Could not reveal Joydash: ${error.message}`;
+  } finally {
+    revealDiscreetCoverButton.disabled = false;
+  }
+});
+
+disableDiscreetModeButton.addEventListener("click", async () => {
+  disableDiscreetModeButton.disabled = true;
+  try {
+    await setDiscreetModeEnabled(false);
+    document.querySelector("#discreet-mode-settings summary").focus();
+  } catch (error) {
+    discreetCoverStatus.textContent = `Could not disable discreet mode: ${error.message}`;
+  } finally {
+    disableDiscreetModeButton.disabled = false;
+  }
+});
+
+discreetModeEnabledCheckbox.addEventListener("change", async () => {
+  discreetModeEnabledCheckbox.disabled = true;
+  try {
+    await setDiscreetModeEnabled(discreetModeEnabledCheckbox.checked);
+  } catch (error) {
+    discreetModeEnabledCheckbox.checked = discreetModeEnabled;
+    historyStatus.textContent = `Could not update discreet mode: ${error.message}`;
+  } finally {
+    discreetModeEnabledCheckbox.disabled = false;
+  }
+});
+
 bookmarkFolderSelect.addEventListener("change", async () => {
   const folderId = bookmarkFolderSelect.value;
   if (!folderId || folderId === selectedBookmarkFolderId) {
@@ -2172,6 +3634,66 @@ bookmarkFolderSelect.addEventListener("change", async () => {
   } catch (error) {
     bookmarkStatus.textContent = `Could not save folder: ${error.message}`;
     renderBookmarkFolders();
+  }
+});
+
+favoriteSiteSelect.addEventListener("change", async () => {
+  const hostname = favoriteSiteSelect.value;
+  if (hostname === selectedFavoriteSiteHostname ||
+      (hostname && !favoriteBookmarkedSites.has(hostname))) {
+    return;
+  }
+  cancelFavoriteSiteRowTransition();
+  const previousHostname = selectedFavoriteSiteHostname;
+  selectedFavoriteSiteHostname = hostname;
+  favoriteSiteRowIndex = 0;
+  favoriteSiteSelect.disabled = true;
+  try {
+    await browser.storage.local.set({ favoriteSiteHostname: hostname });
+    favoriteSiteStatus.textContent = "";
+    renderFavoriteSiteVideos();
+  } catch (error) {
+    selectedFavoriteSiteHostname = previousHostname;
+    favoriteSiteStatus.textContent = `Could not save the selected site: ${error.message}`;
+    renderFavoriteSiteOptions();
+    renderFavoriteSiteVideos();
+  } finally {
+    favoriteSiteSelect.disabled = favoriteBookmarkedSites.size === 0;
+  }
+});
+
+favoriteSitePreviousRowButton.addEventListener("click", () => {
+  navigateFavoriteSiteRow(-1);
+});
+
+favoriteSiteNextRowButton.addEventListener("click", () => {
+  navigateFavoriteSiteRow(1);
+});
+
+randomVideoBackButton.addEventListener("click", () => {
+  navigateRandomVideo("back");
+});
+
+randomVideoForwardButton.addEventListener("click", () => {
+  navigateRandomVideo("forward");
+});
+
+manageShortcutsButton.addEventListener("click", () => {
+  manageShortcuts = !manageShortcuts;
+  renderBookmarks(bookmarkGroups);
+});
+
+toggleContinueSectionButton.addEventListener("click", async () => {
+  const nextCollapsed = !continueSectionCollapsed;
+  toggleContinueSectionButton.disabled = true;
+  try {
+    await browser.storage.local.set({ continueSectionCollapsed: nextCollapsed });
+    continueSectionCollapsed = nextCollapsed;
+    updateContinueSection();
+  } catch (error) {
+    historyStatus.textContent = `Could not save dashboard layout: ${error.message}`;
+  } finally {
+    toggleContinueSectionButton.disabled = false;
   }
 });
 
@@ -2212,6 +3734,8 @@ clearPreviewsButton.addEventListener("click", async () => {
       );
     }
     updateVisibleHistory();
+    renderFavoriteSiteVideos();
+    renderRandomVideoSection();
     historyStatus.textContent = "Saved poster art cleared from this device.";
     updatePreviewLoadButton();
     previewPhase = loadPreviewsButton.disabled ? "done" : "pages";
@@ -2302,6 +3826,16 @@ loadPreviewsButton.addEventListener("click", async () => {
 
 browser.permissions?.onAdded?.addListener(refreshAutomaticPreviewsButton);
 browser.permissions?.onRemoved?.addListener(refreshAutomaticPreviewsButton);
+document.addEventListener("visibilitychange", () => {
+  updateRandomVideoVisibility();
+  if (!document.hidden && !favoriteSiteVideosSection.hidden) {
+    observeFavoriteSiteVideoSection();
+    if (favoriteSiteVideosAreVisible) {
+      void scanFavoriteSitePreviews();
+    }
+  }
+});
+reducedMotionPreference.addEventListener("change", handleReducedMotionChange);
 refreshAutomaticPreviewsButton();
 browser.bookmarks?.onCreated?.addListener(scheduleBookmarkRefresh);
 browser.bookmarks?.onChanged?.addListener(scheduleBookmarkRefresh);
@@ -2309,8 +3843,17 @@ browser.bookmarks?.onMoved?.addListener(scheduleBookmarkRefresh);
 browser.bookmarks?.onRemoved?.addListener(scheduleBookmarkRefresh);
 browser.bookmarks?.onChildrenReordered?.addListener(scheduleBookmarkRefresh);
 browser.history?.onVisitRemoved?.addListener(scheduleHistoryReconciliation);
-loadBookmarks()
+initializeDiscreetMode()
+  .then(loadBookmarks)
   .then(loadHistoryAfterBookmarks)
   .catch((error) => {
+    if (!discreetModeInitialized) {
+      discreetCoverStatus.textContent = `Could not initialize discreet mode: ${error.message}`;
+      revealDiscreetCoverButton.hidden = false;
+      return;
+    }
     showBookmarkLoadError(error);
+    if (discreetCoverActive) {
+      discreetCoverStatus.textContent = `Bookmarks unavailable: ${error.message}`;
+    }
   });

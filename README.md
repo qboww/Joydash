@@ -4,8 +4,13 @@ Joydash is a Firefox home-page dashboard for bookmarks, recent history, and vide
 
 ## Features
 
+- Arrange and hide shortcuts from the selected Firefox bookmark folder.
+- Collapse the recent activity section; layout preferences stay on this device.
 - Browse recent pages from sites bookmarked in a selected folder.
 - Search and filter history by site and date.
+- Browse preview rows from all bookmarked sites or focus on one site at a time.
+- Rotate two random saved posters with smooth transitions, hover feedback, and short back/forward history; play muted direct clips when available and reduced motion is off.
+- Cover the dashboard for the current Firefox session with discreet mode.
 - See video previews and open recent pages from the history panel.
 - Keep favorite bookmarks in a compact, scrollable shelf.
 - Cache history and preview data locally in Firefox.
@@ -24,7 +29,7 @@ Temporary add-ons are removed when Firefox closes. Install a signed add-on to ke
 
 ## Privacy
 
-Bookmarks and history are read locally. When you allow site access, Joydash may request page and image URLs from bookmarked sites to load previews and favicons. Those sites can see your IP address and the requested URL; requests omit cookies and referrers. The developer does not receive this data.
+Bookmarks and history are read locally. When you allow site access, Joydash may request page and image URLs from bookmarked sites for previews and favicons, and may stream a direct video URL for a muted preview. Page and image requests omit cookies and referrers; clip playback uses anonymous CORS and no referrer. Sites can see your IP address and the requested URLs. The developer does not receive this data.
 
 For details on filtering, caching, permissions, and request limits, see [Behavior, caching, and privacy](docs/behavior-and-privacy.md).
 

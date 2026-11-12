@@ -14,23 +14,35 @@
     <link rel="stylesheet" href="newtab.css">
   </head>
   <body>
-    <main class="page">
+    <main class="page" inert>
       <div class="dashboard-layout">
         <section class="history-section" aria-labelledby="history-heading">
           <div class="section-heading">
             <div class="history-heading-title">
-              <p class="eyebrow">BACK FOR MORE?</p>
-              <h2 id="history-heading">Recently viewed videos</h2>
+              <p class="eyebrow">PICK UP WHERE YOU LEFT OFF</p>
+              <h2 id="history-heading">Continue where you left off</h2>
               <details class="history-info">
                 <summary aria-label="Preview information" title="Preview information">?</summary>
                 <div class="history-info-popover">
                   <p class="history-info-heading">Preview details</p>
                   <p id="history-info-status" class="history-info-status" role="status" aria-live="polite"></p>
-                  <p class="history-info-description">Counts reflect pages with usable poster images. Some pages may not expose one or may need site approval.</p>
+                  <p class="history-info-description">Counts reflect pages with usable poster images.</p>
                 </div>
               </details>
             </div>
             <div class="history-actions">
+              <button id="toggle-discreet-mode" class="text-button" type="button" aria-pressed="false" hidden>Cover Joydash</button>
+              <details id="discreet-mode-settings" class="discreet-mode-settings">
+                <summary class="text-button">Discreet settings</summary>
+                <div class="discreet-mode-popover">
+                  <label>
+                    <input id="discreet-mode-enabled" type="checkbox" checked>
+                    <span>Enable discreet mode</span>
+                  </label>
+                  <p>The cover stays on until Firefox closes. Turn it off here to disable the feature across restarts.</p>
+                </div>
+              </details>
+              <button id="toggle-continue-section" class="text-button" type="button" aria-expanded="true">Hide previews</button>
               <button id="load-previews" class="text-button preview-load-button" type="button">Load previews</button>
               <button id="clear-previews" class="text-button" type="button">Clear saved art</button>
               <div class="bookmark-actions">
@@ -43,40 +55,99 @@
               </div>
             </div>
           </div>
-          <p id="bookmark-status" class="section-status" role="status" aria-live="polite"></p>
-          <p id="history-status" class="section-status" role="status" aria-live="polite"></p>
-          <div class="history-filters" role="search" aria-label="Filter history">
-            <div class="history-search-control">
-              <input id="history-search" type="search" placeholder="Search title, site, or URL" aria-label="Search history by title, site, or URL" autocomplete="off">
-              <button id="clear-history-search" class="text-button history-clear-search" type="button" aria-label="Clear history search" hidden>Clear</button>
+          <div id="continue-content">
+            <p id="bookmark-status" class="section-status" role="status" aria-live="polite"></p>
+            <p id="history-status" class="section-status" role="status" aria-live="polite"></p>
+            <div class="history-filters" role="search" aria-label="Filter history">
+              <div class="history-search-control">
+                <input id="history-search" type="search" placeholder="Search title, site, or URL" aria-label="Search history by title, site, or URL" autocomplete="off">
+                <button id="clear-history-search" class="text-button history-clear-search" type="button" aria-label="Clear history search" hidden>Clear</button>
+              </div>
+              <select id="history-site-filter" aria-label="Filter history by site">
+                <option value="">All bookmarked sites</option>
+              </select>
+              <select id="history-date-filter" aria-label="Filter history by date">
+                <option value="">Any date</option>
+                <option value="24h">Past 24 hours</option>
+                <option value="7d">Past 7 days</option>
+                <option value="30d">Past 30 days</option>
+              </select>
+              <div class="history-filter-actions">
+                <label class="video-only-filter">
+                  <input id="history-video-only" type="checkbox" checked>
+                  <span>Videos only</span>
+                </label>
+                <label class="video-only-filter" title="Show videos without previews">
+                  <input id="history-include-no-preview" type="checkbox" aria-label="Show videos without previews">
+                  <span>No preview</span>
+                </label>
+                <button id="reset-history-filters" class="text-button history-filter-reset" type="button">Reset filters</button>
+              </div>
             </div>
-            <select id="history-site-filter" aria-label="Filter history by site">
-              <option value="">All bookmarked sites</option>
-            </select>
-            <select id="history-date-filter" aria-label="Filter history by date">
-              <option value="">Any date</option>
-              <option value="24h">Past 24 hours</option>
-              <option value="7d">Past 7 days</option>
-              <option value="30d">Past 30 days</option>
-            </select>
-            <div class="history-filter-actions">
-              <label class="video-only-filter">
-                <input id="history-video-only" type="checkbox" checked>
-                <span>Videos only</span>
-              </label>
-              <label class="video-only-filter" title="Show videos without previews">
-                <input id="history-include-no-preview" type="checkbox" aria-label="Show videos without previews">
-                <span>No preview</span>
-              </label>
-              <button id="reset-history-filters" class="text-button history-filter-reset" type="button">Reset filters</button>
+            <p id="history-filter-status" class="history-filter-status" role="status" aria-live="polite"></p>
+            <div id="history-grid" class="history-grid"></div>
+            <p id="history-empty" class="empty-state" hidden></p>
+            <div class="history-pagination">
+              <button id="load-more-history" class="text-button load-more-button" type="button" hidden>View more</button>
+              <button id="show-less-history" class="text-button show-less-button" type="button" hidden>Show less</button>
             </div>
-          </div>
-          <p id="history-filter-status" class="history-filter-status" role="status" aria-live="polite"></p>
-          <div id="history-grid" class="history-grid"></div>
-          <p id="history-empty" class="empty-state" hidden></p>
-          <div class="history-pagination">
-            <button id="load-more-history" class="text-button load-more-button" type="button" hidden>View more</button>
-            <button id="show-less-history" class="text-button show-less-button" type="button" hidden>Show less</button>
+            <section id="favorite-site-videos-section" class="automatic-history-section" aria-labelledby="favorite-site-videos-heading" hidden>
+              <div class="automatic-history-heading favorite-site-video-heading-row">
+                <div>
+                  <h3 id="favorite-site-videos-heading">From your favorite sites</h3>
+                  <p>Choose one site or browse all bookmarked sites; use the arrows to move between preview rows.</p>
+                </div>
+                <div class="favorite-site-toolbar">
+                  <label class="favorite-site-picker">
+                    <span>Site</span>
+                    <select id="favorite-site-select" aria-label="Choose a favorite site" disabled>
+                      <option>Loading sites...</option>
+                    </select>
+                  </label>
+                  <div class="favorite-site-row-controls">
+                    <button id="favorite-site-previous-row" class="favorite-site-row-nav" type="button" aria-label="Show previous row of favorite-site previews" title="Previous row" hidden>‹</button>
+                    <button id="favorite-site-next-row" class="favorite-site-row-nav" type="button" aria-label="Show next row of favorite-site previews" title="Next row" hidden>›</button>
+                  </div>
+                </div>
+              </div>
+              <p id="favorite-site-status" class="automatic-history-status" role="status" aria-live="polite"></p>
+              <div id="favorite-site-videos" class="favorite-site-video-groups"></div>
+            </section>
+            <section id="random-video-section" class="automatic-history-section random-video-section" aria-labelledby="random-video-heading" hidden>
+              <div class="automatic-history-heading random-video-heading-row">
+                <div>
+                  <h3 id="random-video-heading">Random previews</h3>
+                  <p>Two previews rotate every five seconds; muted clips play when available. Use the top arrows to revisit up to three pairs you haven't opened.</p>
+                </div>
+                <div class="random-video-heading-controls">
+                  <button id="random-video-back" class="random-video-nav" type="button" aria-label="Go back to previous previews" title="Previous previews" disabled>‹</button>
+                  <button id="random-video-forward" class="random-video-nav" type="button" aria-label="Show next previews" title="Next previews" disabled>›</button>
+                </div>
+              </div>
+              <div class="random-video-carousel">
+                <div class="random-video-stage">
+                  <a class="random-video-slot" href="#" target="_blank" rel="noopener noreferrer">
+                    <img id="random-video-previous-poster-1" class="random-video-previous-poster" alt="" aria-hidden="true" hidden>
+                    <img id="random-video-poster-1" class="random-video-poster" alt="" hidden>
+                    <video id="random-video-player-1" class="random-video-player" muted playsinline preload="metadata" aria-label="Muted five-second video preview, first slot" hidden></video>
+                    <div class="random-video-caption">
+                      <span id="random-video-title-1" class="random-video-title"></span>
+                      <span id="random-video-site-1" class="random-video-site"></span>
+                    </div>
+                  </a>
+                  <a class="random-video-slot" href="#" target="_blank" rel="noopener noreferrer">
+                    <img id="random-video-previous-poster-2" class="random-video-previous-poster" alt="" aria-hidden="true" hidden>
+                    <img id="random-video-poster-2" class="random-video-poster" alt="" hidden>
+                    <video id="random-video-player-2" class="random-video-player" muted playsinline preload="metadata" aria-label="Muted five-second video preview, second slot" hidden></video>
+                    <div class="random-video-caption">
+                      <span id="random-video-title-2" class="random-video-title"></span>
+                      <span id="random-video-site-2" class="random-video-site"></span>
+                    </div>
+                  </a>
+                </div>
+              </div>
+              <p id="random-video-status" class="automatic-history-status" role="status" aria-live="polite"></p>
+            </section>
           </div>
         </section>
 
@@ -93,7 +164,19 @@
         </aside>
 
         <section class="bookmarks-section" aria-label="Favorite bookmarks">
+          <div class="shortcuts-heading">
+            <div>
+              <p class="eyebrow">YOUR SPACE</p>
+              <h2>Shortcuts</h2>
+            </div>
+            <button id="manage-shortcuts" class="text-button" type="button" aria-pressed="false">Arrange</button>
+          </div>
+          <p id="shortcuts-help" class="shortcuts-help" hidden>Reorder or hide shortcuts here. Hidden shortcuts can be restored; this does not change which sites contribute to history.</p>
           <div id="bookmark-grid" class="bookmark-grid"></div>
+          <div id="hidden-shortcuts" class="hidden-shortcuts" hidden>
+            <span class="hidden-shortcuts-label">Hidden shortcuts</span>
+            <div id="hidden-shortcut-list" class="hidden-shortcut-list"></div>
+          </div>
           <p id="bookmark-empty" class="empty-state" hidden></p>
         </section>
       </div>
@@ -102,10 +185,19 @@
         <a href="https://icons8.com/" target="_blank" rel="noopener noreferrer">Monkey icon by Icons8</a>
       </footer>
     </main>
-    <div id="history-hover-preview" class="history-hover-preview" role="group" aria-label="History preview" aria-hidden="true">
+    <div id="history-hover-preview" class="history-hover-preview" role="group" aria-label="History preview" aria-hidden="true" inert>
       <img id="history-hover-preview-image" alt="">
       <span id="history-hover-preview-title" class="history-hover-preview-title"></span>
       <span id="history-hover-preview-message" class="history-hover-preview-message" role="status" aria-live="polite"></span>
+    </div>
+    <div id="discreet-cover" class="discreet-cover" role="dialog" aria-modal="true" aria-labelledby="discreet-cover-heading">
+      <div class="discreet-cover-panel">
+        <p class="eyebrow">PRIVATE SPACE</p>
+        <h1 id="discreet-cover-heading">Joydash is covered</h1>
+        <p id="discreet-cover-status" role="status" aria-live="polite">Preparing your dashboard…</p>
+        <button id="reveal-discreet-cover" class="text-button" type="button" hidden>Show Joydash</button>
+        <button id="disable-discreet-mode" class="discreet-cover-disable" type="button" hidden>Disable discreet mode</button>
+      </div>
     </div>
     <script src="newtab.js"></script>
   </body>

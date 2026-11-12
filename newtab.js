@@ -57,6 +57,7 @@ const randomVideoSlots = [1, 2].map((slotNumber) => {
 const randomVideoStatus = document.querySelector("#random-video-status");
 const favoriteHistoryList = document.querySelector("#favorite-history-list");
 const favoriteHistoryEmpty = document.querySelector("#favorite-history-empty");
+const historyRailDate = document.querySelector("#history-rail-date");
 const historyRailClock = document.querySelector("#history-rail-clock");
 const historyHoverPreview = document.querySelector("#history-hover-preview");
 const historyHoverPreviewImage = document.querySelector("#history-hover-preview-image");
@@ -375,17 +376,24 @@ function getDashboardSections() {
   );
 }
 
-function updateHistoryRailClock() {
+function updateHistoryRailDateTime() {
   const now = new Date();
+  const formattedDate = new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric"
+  }).format(now);
   const formattedTime = new Intl.DateTimeFormat(undefined, {
     hour: "numeric",
     minute: "2-digit"
   }).format(now);
+  historyRailDate.textContent = formattedDate;
+  historyRailDate.dateTime = now.toISOString();
+  historyRailDate.setAttribute("aria-label", `Local date: ${formattedDate}`);
   historyRailClock.textContent = formattedTime;
   historyRailClock.dateTime = now.toISOString();
   historyRailClock.setAttribute("aria-label", `Local time: ${formattedTime}`);
   window.setTimeout(
-    updateHistoryRailClock,
+    updateHistoryRailDateTime,
     60_000 - (Date.now() % 60_000)
   );
 }
@@ -4450,7 +4458,7 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 reducedMotionPreference.addEventListener("change", handleReducedMotionChange);
-updateHistoryRailClock();
+updateHistoryRailDateTime();
 refreshAutomaticPreviewsButton();
 browser.bookmarks?.onCreated?.addListener(scheduleBookmarkRefresh);
 browser.bookmarks?.onChanged?.addListener(scheduleBookmarkRefresh);

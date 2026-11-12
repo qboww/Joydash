@@ -1692,6 +1692,20 @@ html.history-pagination-loading {
   left: auto;
 }
 
+.history-rail-datetime {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+}
+
+.history-rail-date {
+  color: #b7bac2;
+  font-size: 11px;
+  opacity: 0.68;
+  white-space: nowrap;
+}
+
 .history-rail-clock {
   padding: 4px 8px;
   border: 1px solid rgba(255, 255, 255, 0.16);

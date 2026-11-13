@@ -88,8 +88,11 @@ let bookmarkedSites = new Map();
 let favoriteBookmarkedSites = new Map();
 let favoriteSiteHistoryItems = [];
 let favoriteSiteHistoryReady = false;
+let favoriteSiteHistoryHasMoreResults = false;
+let favoriteSiteHistoryOlderEndTime = null;
 let favoriteSiteRows = [];
 let favoriteSiteRowLoadInProgress = false;
+let favoriteSiteInitialScanKey = "";
 let automaticSectionsInitialRevealComplete = false;
 let automaticSectionRevealInProgress = false;
 let automaticSectionsRevealed = new Set();
@@ -169,8 +172,7 @@ const HISTORY_HOVER_PREVIEW_DELAY_MS = 180;
 const HISTORY_FILTER_DEBOUNCE_MS = 500;
 const FAVORITE_SITE_SEARCH_STATUS_DELAY_MS = 1_000;
 const MAX_FAVORITE_SITE_CARDS = 4;
-const MAX_FAVORITE_SITE_PREVIEW_ATTEMPTS_PER_SITE = MAX_FAVORITE_SITE_CARDS;
-const MAX_FAVORITE_SITE_PREVIEW_CHECKS = 16;
+const MAX_FAVORITE_SITE_PAGES_PER_NEXT = 5;
 const MAX_FAVORITE_SITE_PREVIEW_CHECKS_PER_NEXT = 16;
 const MAX_RANDOM_PREVIEW_CHECKS = 8;
 const AUTOMATIC_SECTION_REVEAL_MS = 450;
@@ -495,10 +497,11 @@ async function saveDashboardSectionOrder(order) {
   applyDashboardSectionOrder(nextOrder);
   try {
     await browser.storage.local.set({ dashboardSectionOrder });
-    dashboardSectionOrderStatus.textContent = "Section order saved.";
+    return true;
   } catch (error) {
     applyDashboardSectionOrder(previousOrder);
     dashboardSectionOrderStatus.textContent = `Could not save section order: ${error.message}`;
+    return false;
   } finally {
     dashboardSectionOrderSaving = false;
     renderDashboardSectionOrderList();
@@ -591,9 +594,7 @@ function updateContinueSection() {
   updateRandomVideoVisibility();
   if (!continueSectionCollapsed && !favoriteSiteVideosSection.hidden) {
     observeFavoriteSiteVideoSection();
-    if (favoriteSiteVideosAreVisible) {
-      void scanFavoriteSitePreviews();
-    }
+    maybeLoadInitialFavoriteSitePreviews();
   }
 }
 
@@ -1107,13 +1108,17 @@ async function updateAutomaticPreviewsButton() {
   randomVideoPermittedUrls.clear();
   randomVideoSourceAttempts.clear();
   favoriteSitePreviewAttempts.clear();
+  favoriteSiteInitialScanKey = "";
+  for (const item of favoriteSiteHistoryItems) {
+    item.favoriteSitePreviewChecked = false;
+  }
   allSitesPermissionGranted = await browser.permissions.contains({
     origins: ["<all_urls>"]
   });
   enableAutomaticPreviewsButton.hidden = allSitesPermissionGranted;
   enableAutomaticPreviewsButton.disabled = allSitesPermissionGranted;
   updateRandomVideoPlayback();
-  void scanFavoriteSitePreviews();
+  maybeLoadInitialFavoriteSitePreviews();
 }
 
 function refreshAutomaticPreviewsButton() {
@@ -1683,60 +1688,16 @@ function createAutomaticHistoryCard(item) {
 }
 
 function renderFavoriteSiteVideos() {
+  const scrollTopBeforeRender = window.scrollY;
   const currentRowAnchor = favoriteSiteRows[favoriteSiteRowIndex]?.items[0]?.url;
   const sitesInScope = getFavoriteBookmarkedSitesInScope();
-  const groupedItems = new Map(
-    [...sitesInScope.keys()].map((hostname) => [hostname, []])
-  );
-  const siteLastVisits = new Map();
-  for (const item of favoriteSiteHistoryItems) {
-    const hostname = getBookmarkedSiteHostnameFrom(item.url, sitesInScope);
-    if (hostname && Number.isFinite(item.lastVisitTime)) {
-      siteLastVisits.set(
-        hostname,
-        Math.max(siteLastVisits.get(hostname) ?? 0, item.lastVisitTime)
-      );
-    }
-  }
-  for (const item of getAutomaticVideoItems(favoriteSiteHistoryItems)) {
-    const hostname = getBookmarkedSiteHostnameFrom(item.url, sitesInScope);
-    if (hostname && groupedItems.has(hostname)) {
-      groupedItems.get(hostname).push(item);
-    }
-  }
-
-  const sortedGroups = [...groupedItems].sort((first, second) => {
-    const firstHasPreviews = first[1].length > 0;
-    const secondHasPreviews = second[1].length > 0;
-    if (firstHasPreviews !== secondHasPreviews) {
-      return Number(secondHasPreviews) - Number(firstHasPreviews);
-    }
-    const firstLatestVisit = Math.max(
-      siteLastVisits.get(first[0]) ?? 0,
-      ...first[1].map((item) => item.lastVisitTime)
-    );
-    const secondLatestVisit = Math.max(
-      siteLastVisits.get(second[0]) ?? 0,
-      ...second[1].map((item) => item.lastVisitTime)
-    );
-    return secondLatestVisit - firstLatestVisit ||
-      (favoriteBookmarkedSites.get(first[0])?.name ?? first[0]).localeCompare(
-        favoriteBookmarkedSites.get(second[0])?.name ?? second[0]
-      );
-  });
+  const availableItems = getOrderedFavoriteSitePreviewItems(sitesInScope);
   const rows = [];
-  for (const [hostname, items] of sortedGroups) {
-    items.sort((first, second) => second.lastVisitTime - first.lastVisitTime);
-    if (items.length === 0) {
-      rows.push({ hostname, items: [] });
-      continue;
-    }
-    for (let index = 0; index < items.length; index += MAX_FAVORITE_SITE_CARDS) {
-      rows.push({
-        hostname,
-        items: items.slice(index, index + MAX_FAVORITE_SITE_CARDS)
-      });
-    }
+  for (let index = 0; index < availableItems.length; index += MAX_FAVORITE_SITE_CARDS) {
+    rows.push({ items: availableItems.slice(index, index + MAX_FAVORITE_SITE_CARDS) });
+  }
+  if (rows.length === 0 && sitesInScope.size > 0) {
+    rows.push({ items: [] });
   }
   favoriteSiteRows = rows;
   if (currentRowAnchor) {
@@ -1752,13 +1713,15 @@ function renderFavoriteSiteVideos() {
     historyFillInProgress ||
     favoriteSitePreviewScanInProgress ||
     favoriteSiteRowTransitionTimer !== null;
-  favoriteSitePreviousRowButton.disabled = rowControlsDisabled;
-  favoriteSiteNextRowButton.disabled = rowControlsDisabled;
-  favoriteSitePreviousRowButton.hidden = favoriteSiteRowIndex === 0;
+  favoriteSitePreviousRowButton.setAttribute(
+    "aria-disabled",
+    String(rowControlsDisabled || favoriteSiteRowIndex === 0)
+  );
+  favoriteSiteNextRowButton.setAttribute("aria-disabled", String(rowControlsDisabled));
   favoriteSiteNextRowButton.hidden = !favoriteSiteHistoryReady ||
     sitesInScope.size === 0 ||
     (favoriteSiteRowIndex >= rows.length - 1 &&
-      !historyHasMoreResults &&
+      !favoriteSiteHistoryHasMoreResults &&
       !hasUnscannedFavoriteSitePreviews());
   favoriteSiteVideos.replaceChildren();
   if (sitesInScope.size === 0 && bookmarkFolders.length > 0) {
@@ -1767,12 +1730,19 @@ function renderFavoriteSiteVideos() {
     emptyState.textContent = "No bookmarked websites found.";
     favoriteSiteVideos.append(emptyState);
   } else if (rows.length > 0) {
-    const { hostname, items } = rows[favoriteSiteRowIndex];
+    const { items } = rows[favoriteSiteRowIndex];
     const siteGroup = document.createElement("section");
     siteGroup.className = "favorite-site-video-group";
     const heading = document.createElement("h4");
     heading.className = "favorite-site-video-heading";
-    heading.textContent = favoriteBookmarkedSites.get(hostname)?.name || hostname;
+    const hostnames = [...new Set(items.map((item) =>
+      getBookmarkedSiteHostnameFrom(item.url, sitesInScope)
+    ).filter(Boolean))];
+    heading.textContent = hostnames.length === 1
+      ? favoriteBookmarkedSites.get(hostnames[0])?.name || hostnames[0]
+      : selectedFavoriteSiteHostname
+        ? favoriteBookmarkedSites.get(selectedFavoriteSiteHostname)?.name || selectedFavoriteSiteHostname
+        : "Favorite sites";
     siteGroup.append(heading);
     if (items.length > 0) {
       const grid = document.createElement("div");
@@ -1797,24 +1767,96 @@ function renderFavoriteSiteVideos() {
     emptyState.textContent = "No bookmarked sites match the current selection.";
     favoriteSiteVideos.append(emptyState);
   }
-    updateAutomaticSectionVisibility();
+  if (favoriteSiteVideos.style.minHeight) {
+    const minHeight = Number.parseFloat(favoriteSiteVideos.style.minHeight);
+    favoriteSiteVideos.style.minHeight = `${Math.max(minHeight, favoriteSiteVideos.offsetHeight)}px`;
+  }
+  updateAutomaticSectionVisibility();
   if (!favoriteSiteVideosSection.hidden) {
     observeFavoriteSiteVideoSection();
-    if (favoriteSiteVideosAreVisible) {
-      void scanFavoriteSitePreviews();
-    }
+    maybeLoadInitialFavoriteSitePreviews();
+  }
+  if (document.documentElement.classList.contains("favorite-site-row-loading")) {
+    window.requestAnimationFrame(() => {
+      if (document.documentElement.classList.contains("favorite-site-row-loading") &&
+          window.scrollY !== scrollTopBeforeRender) {
+        window.scrollTo(window.scrollX, scrollTopBeforeRender);
+      }
+    });
   }
 }
 
+function getFavoriteSiteHistoryItemsInScope(sitesInScope = getFavoriteBookmarkedSitesInScope()) {
+  return favoriteSiteHistoryItems
+    .filter((item) => getBookmarkedSiteHostnameFrom(item.url, sitesInScope))
+    .sort((first, second) => second.lastVisitTime - first.lastVisitTime);
+}
+
+function getOrderedFavoriteSitePreviewItems(sitesInScope = getFavoriteBookmarkedSitesInScope()) {
+  const availableItems = [];
+  for (const item of getFavoriteSiteHistoryItemsInScope(sitesInScope)) {
+    const metadata = getFreshPreviewMetadata(item.url);
+    const savedPoster = previewCache[item.url];
+    const hasSavedPoster = savedPoster?.videoPage === true &&
+      typeof savedPoster.dataUrl === "string";
+    const itemResolved = item.favoriteSitePreviewChecked === true ||
+      hasSavedPoster ||
+      (metadata && (metadata.videoPage === false || !metadata.imageUrl));
+    if (!itemResolved) {
+      break;
+    }
+    if (hasSavedPoster && getAutomaticVideoItems([item]).length > 0) {
+      availableItems.push(item);
+    }
+  }
+  return availableItems;
+}
+
 function hasUnscannedFavoriteSitePreviews() {
-  const sitesInScope = getFavoriteBookmarkedSitesInScope();
-  return favoriteSiteHistoryItems.some((item) =>
-    getBookmarkedSiteHostnameFrom(item.url, sitesInScope) &&
+  return getFavoriteSiteHistoryItemsInScope().some((item) =>
     item.favoriteSitePreviewChecked !== true &&
     !favoriteSitePreviewAttempts.has(item.url) &&
     !previewCache[item.url]?.dataUrl &&
     getFreshPreviewMetadata(item.url)?.videoPage !== false
   );
+}
+
+function maybeLoadInitialFavoriteSitePreviews() {
+  if (!favoriteSiteHistoryReady ||
+      !favoriteSiteVideosAreVisible ||
+      continueSectionCollapsed ||
+      discreetCoverActive ||
+      historyInitialBatchLoading ||
+      historyFillInProgress ||
+      favoriteSiteRowLoadInProgress ||
+      favoriteSitePreviewScanInProgress) {
+    return;
+  }
+  const scanKey = `${favoriteSiteHistoryLoadVersion}:${selectedFavoriteSiteHostname}`;
+  if (favoriteSiteInitialScanKey === scanKey) {
+    return;
+  }
+  favoriteSiteInitialScanKey = scanKey;
+  void loadInitialFavoriteSitePreviews().catch((error) => {
+    favoriteSiteStatus.textContent = `Could not load favorite-site previews: ${error.message}`;
+  });
+}
+
+async function loadInitialFavoriteSitePreviews() {
+  let checkedCandidates = 0;
+  while (checkedCandidates < MAX_FAVORITE_SITE_PREVIEW_CHECKS_PER_NEXT &&
+      getOrderedFavoriteSitePreviewItems().length < MAX_FAVORITE_SITE_CARDS) {
+    const checkedCount = await scanFavoriteSitePreviews({
+      maxCandidates: Math.min(
+        MAX_FAVORITE_SITE_CARDS,
+        MAX_FAVORITE_SITE_PREVIEW_CHECKS_PER_NEXT - checkedCandidates
+      )
+    });
+    checkedCandidates += checkedCount;
+    if (checkedCount === 0) {
+      break;
+    }
+  }
 }
 
 function animateAutomaticHistorySection(section, onComplete) {
@@ -1831,23 +1873,45 @@ function cancelFavoriteSiteRowTransition() {
   clearTimeout(favoriteSiteRowTransitionTimer);
   favoriteSiteRowTransitionTimer = null;
   favoriteSiteVideos.classList.remove("is-transitioning");
-  favoriteSitePreviousRowButton.disabled = false;
-  favoriteSiteNextRowButton.disabled = false;
+  favoriteSiteVideos.style.minHeight = "";
+  favoriteSitePreviousRowButton.setAttribute(
+    "aria-disabled",
+    String(favoriteSiteRowIndex === 0)
+  );
+  favoriteSiteNextRowButton.setAttribute("aria-disabled", "false");
+  document.documentElement.classList.remove("favorite-site-row-loading");
 }
 
 function transitionFavoriteSiteRow(direction) {
   if (favoriteSiteRowTransitionTimer !== null) {
     return;
   }
-  favoriteSitePreviousRowButton.disabled = true;
-  favoriteSiteNextRowButton.disabled = true;
+  document.documentElement.classList.add("favorite-site-row-loading");
+  favoriteSitePreviousRowButton.setAttribute("aria-disabled", "true");
+  favoriteSiteNextRowButton.setAttribute("aria-disabled", "true");
+  if (!favoriteSiteVideos.style.minHeight) {
+    favoriteSiteVideos.style.minHeight = `${favoriteSiteVideos.offsetHeight}px`;
+  }
   favoriteSiteVideos.classList.add("is-transitioning");
   favoriteSiteRowTransitionTimer = setTimeout(() => {
     favoriteSiteRowTransitionTimer = null;
     favoriteSiteRowIndex += direction;
     renderFavoriteSiteVideos();
+    const preferredButton = direction > 0
+      ? favoriteSiteNextRowButton
+      : favoriteSitePreviousRowButton;
+    const fallbackButton = direction > 0
+      ? favoriteSitePreviousRowButton
+      : favoriteSiteNextRowButton;
+    const focusTarget = preferredButton.hidden ? fallbackButton : preferredButton;
+    if (!focusTarget.hidden) {
+      focusTarget.focus({ preventScroll: true });
+    } else {
+      favoriteSiteSelect.focus({ preventScroll: true });
+    }
     window.requestAnimationFrame(() => {
       favoriteSiteVideos.classList.remove("is-transitioning");
+      document.documentElement.classList.remove("favorite-site-row-loading");
     });
   }, 850);
 }
@@ -1856,19 +1920,30 @@ async function navigateFavoriteSiteRow(direction) {
   const button = direction < 0
     ? favoriteSitePreviousRowButton
     : favoriteSiteNextRowButton;
-  if (button.hidden || button.disabled || favoriteSiteRowTransitionTimer !== null) {
+  if (button.hidden ||
+      button.getAttribute("aria-disabled") === "true" ||
+      favoriteSiteRowTransitionTimer !== null ||
+      (direction < 0 && favoriteSiteRowIndex === 0)) {
     return;
   }
-  if (direction < 0 || favoriteSiteRowIndex < favoriteSiteRows.length - 1) {
+  const nextRow = favoriteSiteRows[favoriteSiteRowIndex + 1];
+  const historyExhausted = !favoriteSiteHistoryHasMoreResults &&
+    !hasUnscannedFavoriteSitePreviews();
+  if (direction < 0 ||
+      nextRow?.items.length >= MAX_FAVORITE_SITE_CARDS ||
+      (nextRow && historyExhausted)) {
     transitionFavoriteSiteRow(direction);
     return;
   }
-  if (favoriteSiteRowLoadInProgress ||
-      (!historyHasMoreResults && !hasUnscannedFavoriteSitePreviews())) {
+  if (favoriteSiteRowLoadInProgress || historyExhausted) {
     return;
   }
 
   favoriteSiteRowLoadInProgress = true;
+  document.documentElement.classList.add("favorite-site-row-loading");
+  if (!favoriteSiteVideos.style.minHeight) {
+    favoriteSiteVideos.style.minHeight = `${favoriteSiteVideos.offsetHeight}px`;
+  }
   const searchStatusMessage = "Searching older history for previews…";
   favoriteSiteStatus.textContent = "";
   const searchStatusTimer = window.setTimeout(() => {
@@ -1881,37 +1956,44 @@ async function navigateFavoriteSiteRow(direction) {
     let checkedCandidates = 0;
     let olderPagesLoaded = 0;
     while (checkedCandidates < MAX_FAVORITE_SITE_PREVIEW_CHECKS_PER_NEXT) {
+      const currentNextRow = favoriteSiteRows[favoriteSiteRowIndex + 1];
+      if (currentNextRow?.items.length >= MAX_FAVORITE_SITE_CARDS) {
+        break;
+      }
       const checkedCount = await scanFavoriteSitePreviews({
         candidateItems: favoriteSiteHistoryItems,
         maxCandidates: MAX_FAVORITE_SITE_PREVIEW_CHECKS_PER_NEXT - checkedCandidates,
         onDemand: true
       });
       checkedCandidates += checkedCount;
-      const nextRow = favoriteSiteRows[favoriteSiteRowIndex + 1];
-      if (nextRow?.items.length >= MAX_FAVORITE_SITE_CARDS ||
+      if (favoriteSiteRows[favoriteSiteRowIndex + 1]?.items.length >= MAX_FAVORITE_SITE_CARDS ||
           checkedCandidates >= MAX_FAVORITE_SITE_PREVIEW_CHECKS_PER_NEXT) {
         break;
       }
       if (checkedCount > 0) {
         continue;
       }
-      if (!historyHasMoreResults || olderPagesLoaded >= MAX_HISTORY_PAGES_PER_FILL) {
+      if (!favoriteSiteHistoryHasMoreResults ||
+          olderPagesLoaded >= MAX_FAVORITE_SITE_PAGES_PER_NEXT) {
         break;
       }
-      const olderPage = await loadOlderHistoryPage();
+      const olderPage = await loadOlderFavoriteSiteHistoryPage();
       if (!olderPage) {
         break;
       }
       olderPagesLoaded += 1;
     }
-    if (favoriteSiteRowIndex < favoriteSiteRows.length - 1) {
+    const loadedNextRow = favoriteSiteRows[favoriteSiteRowIndex + 1];
+    const historyIsExhausted = !favoriteSiteHistoryHasMoreResults &&
+      !hasUnscannedFavoriteSitePreviews();
+    if (loadedNextRow &&
+        (loadedNextRow.items.length >= MAX_FAVORITE_SITE_CARDS || historyIsExhausted)) {
       favoriteSiteStatus.textContent = "";
       transitionFavoriteSiteRow(1);
     } else {
-      favoriteSiteStatus.textContent = historyHasMoreResults ||
-          hasUnscannedFavoriteSitePreviews()
-        ? "No new previews found yet. Select Next to keep searching."
-        : "No more saved previews are available in your history.";
+      favoriteSiteStatus.textContent = historyIsExhausted
+        ? "No more saved previews are available in your history."
+        : "Select Next to continue searching for a full row.";
     }
   } catch (error) {
     favoriteSiteStatus.textContent = `Could not load older favorite-site previews: ${error.message}`;
@@ -1922,6 +2004,9 @@ async function navigateFavoriteSiteRow(direction) {
     }
     favoriteSiteRowLoadInProgress = false;
     renderFavoriteSiteVideos();
+    if (favoriteSiteRowTransitionTimer === null) {
+      document.documentElement.classList.remove("favorite-site-row-loading");
+    }
   }
 }
 
@@ -1932,9 +2017,7 @@ function observeFavoriteSiteVideoSection() {
         favoriteSiteVideosAreVisible = entries.some((entry) =>
           entry.target === favoriteSiteVideosSection && entry.isIntersecting
         );
-        if (favoriteSiteVideosAreVisible) {
-          void scanFavoriteSitePreviews();
-        }
+        maybeLoadInitialFavoriteSitePreviews();
       }, { threshold: 0 });
     }
     favoriteSiteVideoObserver.observe(favoriteSiteVideosSection);
@@ -1942,15 +2025,7 @@ function observeFavoriteSiteVideoSection() {
   }
   const bounds = favoriteSiteVideosSection.getBoundingClientRect();
   favoriteSiteVideosAreVisible = bounds.bottom > 0 && bounds.top < window.innerHeight;
-  if (favoriteSiteVideosAreVisible) {
-    void scanFavoriteSitePreviews();
-  }
-}
-
-function getFavoriteSitePreviewAttemptCount(hostname) {
-  return [...favoriteSitePreviewAttempts]
-    .filter((url) => getBookmarkedSiteHostnameFrom(url, favoriteBookmarkedSites) === hostname)
-    .length;
+  maybeLoadInitialFavoriteSitePreviews();
 }
 
 function createFavoriteSitePreviewCard(item) {
@@ -1973,76 +2048,34 @@ async function scanFavoriteSitePreviews({
   maxCandidates = MAX_FAVORITE_SITE_CARDS,
   onDemand = false
 } = {}) {
-  const isSpecificSiteSelected = Boolean(selectedFavoriteSiteHostname);
   if (favoriteSitePreviewScanInProgress ||
-      !favoriteSiteVideosAreVisible ||
+      (!onDemand && !favoriteSiteVideosAreVisible) ||
       document.hidden ||
       historyInitialBatchLoading ||
       historyFillInProgress ||
       (!onDemand && favoriteSiteRowLoadInProgress) ||
       !favoriteSiteHistoryReady ||
       continueSectionCollapsed ||
-      discreetCoverActive ||
-      (!onDemand &&
-        !isSpecificSiteSelected &&
-        favoriteSitePreviewAttempts.size >= MAX_FAVORITE_SITE_PREVIEW_CHECKS)) {
+      discreetCoverActive) {
     return 0;
   }
   const sitesInScope = getFavoriteBookmarkedSitesInScope();
-  const itemsBySite = new Map([...sitesInScope.keys()].map((hostname) => [hostname, []]));
-  for (const item of candidateItems) {
-    const hostname = getBookmarkedSiteHostnameFrom(item.url, sitesInScope);
-    if (hostname && itemsBySite.has(hostname)) {
-      itemsBySite.get(hostname).push(item);
-    }
-  }
-
   const cards = [];
-  const getCandidates = (siteItems) => siteItems
-      .filter((item) =>
-        !previewCache[item.url]?.dataUrl &&
-        !favoriteSitePreviewAttempts.has(item.url) &&
-        item.favoriteSitePreviewChecked !== true &&
-        getFreshPreviewMetadata(item.url)?.videoPage !== false
-      )
-      .sort((first, second) => {
-        const firstIsKnownVideo = getFreshPreviewMetadata(first.url)?.videoPage === true;
-        const secondIsKnownVideo = getFreshPreviewMetadata(second.url)?.videoPage === true;
-        return Number(secondIsKnownVideo) - Number(firstIsKnownVideo) ||
-          second.lastVisitTime - first.lastVisitTime;
-      });
-
-  if (onDemand) {
-    const candidatesBySite = [...itemsBySite]
-      .map(([hostname, siteItems]) => [hostname, getCandidates(siteItems)])
-      .filter(([, candidates]) => candidates.length > 0)
-      .sort((first, second) =>
-        second[1].length - first[1].length ||
-        second[1][0].lastVisitTime - first[1][0].lastVisitTime
-      );
-    const [, candidates = []] = candidatesBySite[0] ?? [];
-    for (const candidate of candidates.slice(0, Math.min(MAX_FAVORITE_SITE_CARDS, maxCandidates))) {
-      candidate.favoriteSitePreviewChecked = true;
-      cards.push(createFavoriteSitePreviewCard(candidate));
-    }
-  } else {
-    for (const [hostname, siteItems] of itemsBySite) {
-      const savedCount = getAutomaticVideoItems(favoriteSiteHistoryItems).filter((item) =>
-        getBookmarkedSiteHostnameFrom(item.url, favoriteBookmarkedSites) === hostname
-      ).length;
-      if (savedCount >= MAX_FAVORITE_SITE_CARDS ||
-          getFavoriteSitePreviewAttemptCount(hostname) >= MAX_FAVORITE_SITE_PREVIEW_ATTEMPTS_PER_SITE ||
-          (!isSpecificSiteSelected &&
-            favoriteSitePreviewAttempts.size + cards.length >= MAX_FAVORITE_SITE_PREVIEW_CHECKS)) {
-        continue;
-      }
-      const candidate = getCandidates(siteItems)[0];
-      if (candidate) {
-        favoriteSitePreviewAttempts.add(candidate.url);
-        candidate.favoriteSitePreviewChecked = true;
-        cards.push(createFavoriteSitePreviewCard(candidate));
-      }
-    }
+  const candidates = candidateItems
+    .filter((item) =>
+      getBookmarkedSiteHostnameFrom(item.url, sitesInScope) &&
+      !previewCache[item.url]?.dataUrl &&
+      !favoriteSitePreviewAttempts.has(item.url) &&
+      item.favoriteSitePreviewChecked !== true &&
+      getFreshPreviewMetadata(item.url)?.videoPage !== false
+    )
+    .sort((first, second) => second.lastVisitTime - first.lastVisitTime);
+  for (const candidate of candidates.slice(
+    0,
+    Math.min(MAX_FAVORITE_SITE_CARDS, Math.max(0, maxCandidates))
+  )) {
+    favoriteSitePreviewAttempts.add(candidate.url);
+    cards.push(createFavoriteSitePreviewCard(candidate));
   }
   if (cards.length === 0) {
     return 0;
@@ -2052,13 +2085,22 @@ async function scanFavoriteSitePreviews({
     const previousRows = favoriteSiteRows
       .slice(Math.max(0, favoriteSiteRowIndex - 2), favoriteSiteRowIndex + 1)
       .flatMap((row) => row.items.map((item) => item.url));
-    const prioritizedUrls = [...new Set([
-      ...previousRows,
-      ...cards.map((card) => card.item.url)
-    ])];
-    await loadPagePreviews(cards, prioritizedUrls);
+    await loadPagePreviews(
+      cards,
+      [
+        ...cards.map((card) => card.item.url),
+        ...previousRows
+      ],
+      favoriteSiteStatus
+    );
+    for (const card of cards) {
+      card.item.favoriteSitePreviewChecked = true;
+    }
   } catch (error) {
-    historyStatus.textContent = `Could not load favorite-site previews: ${error.message}`;
+    for (const card of cards) {
+      favoriteSitePreviewAttempts.delete(card.item.url);
+    }
+    throw error;
   } finally {
     favoriteSitePreviewScanInProgress = false;
     renderFavoriteSiteVideos();
@@ -3044,21 +3086,31 @@ function renderFavoriteHistory(items) {
 }
 
 function updateHistorySearchCursor(items, previousEndTime = null) {
+  const cursor = getHistorySearchCursor(items, previousEndTime);
+  historyHasMoreResults = cursor.hasMoreResults;
+  historyOlderEndTime = cursor.olderEndTime;
+}
+
+function updateFavoriteSiteHistorySearchCursor(items, previousEndTime = null) {
+  const cursor = getHistorySearchCursor(items, previousEndTime);
+  favoriteSiteHistoryHasMoreResults = cursor.hasMoreResults;
+  favoriteSiteHistoryOlderEndTime = cursor.olderEndTime;
+}
+
+function getHistorySearchCursor(items, previousEndTime = null) {
   let oldestVisitTime = Infinity;
   for (const item of items) {
     if (Number.isFinite(item?.lastVisitTime)) {
       oldestVisitTime = Math.min(oldestVisitTime, item.lastVisitTime);
     }
   }
-  if (items.length < MAX_HISTORY_RESULTS ||
-      !Number.isFinite(oldestVisitTime) ||
-      (previousEndTime !== null && oldestVisitTime + 1 >= previousEndTime)) {
-    historyHasMoreResults = false;
-    historyOlderEndTime = null;
-    return;
-  }
-  historyHasMoreResults = true;
-  historyOlderEndTime = oldestVisitTime + 1;
+  const hasMoreResults = items.length >= MAX_HISTORY_RESULTS &&
+    Number.isFinite(oldestVisitTime) &&
+    (previousEndTime === null || oldestVisitTime + 1 < previousEndTime);
+  return {
+    hasMoreResults,
+    olderEndTime: hasMoreResults ? oldestVisitTime + 1 : null
+  };
 }
 
 function normalizeHistorySnapshotItems(items, sites = bookmarkedSites) {
@@ -3080,6 +3132,8 @@ function normalizeHistorySnapshotItems(items, sites = bookmarkedSites) {
 async function loadFavoriteSiteHistory() {
   const loadVersion = ++favoriteSiteHistoryLoadVersion;
   favoriteSiteHistoryReady = false;
+  favoriteSiteHistoryHasMoreResults = false;
+  favoriteSiteHistoryOlderEndTime = null;
   favoriteSiteStatus.textContent = "Reading history from bookmarked sites…";
   if (favoriteBookmarkedSites.size === 0) {
     favoriteSiteHistoryItems = [];
@@ -3092,6 +3146,7 @@ async function loadFavoriteSiteHistory() {
     if (loadVersion !== favoriteSiteHistoryLoadVersion) {
       return;
     }
+    updateFavoriteSiteHistorySearchCursor(items);
     favoriteSiteHistoryItems = normalizeHistorySnapshotItems(items, favoriteBookmarkedSites);
   }
   if (loadVersion !== favoriteSiteHistoryLoadVersion) {
@@ -3105,6 +3160,32 @@ async function loadFavoriteSiteHistory() {
       ? `No recent history from ${selectedSite?.name ?? "your bookmarked sites"}.`
       : "";
   renderFavoriteSiteVideos();
+}
+
+async function loadOlderFavoriteSiteHistoryPage() {
+  if (!favoriteSiteHistoryHasMoreResults ||
+      !Number.isFinite(favoriteSiteHistoryOlderEndTime)) {
+    return null;
+  }
+  const endTime = favoriteSiteHistoryOlderEndTime;
+  const loadVersion = favoriteSiteHistoryLoadVersion;
+  const items = await browser.history.search({
+    text: "",
+    startTime: 0,
+    endTime,
+    maxResults: MAX_HISTORY_RESULTS
+  });
+  if (loadVersion !== favoriteSiteHistoryLoadVersion) {
+    return null;
+  }
+  updateFavoriteSiteHistorySearchCursor(items, endTime);
+  const knownFavoriteUrls = new Set(favoriteSiteHistoryItems.map((item) => item.url));
+  const olderFavoriteItems = normalizeHistorySnapshotItems(items, favoriteBookmarkedSites)
+    .filter((item) => !knownFavoriteUrls.has(item.url));
+  favoriteSiteHistoryItems.push(...olderFavoriteItems);
+  favoriteSiteHistoryItems.sort((first, second) => second.lastVisitTime - first.lastVisitTime);
+  renderFavoriteSiteVideos();
+  return { items, favoriteSiteItems: olderFavoriteItems };
 }
 
 async function loadOlderHistoryPage() {
@@ -3147,16 +3228,6 @@ async function loadOlderHistoryPageData() {
   }
   olderPages.sort((a, b) => (b.lastVisitTime ?? 0) - (a.lastVisitTime ?? 0));
   historyItems.push(...olderPages);
-  if (favoriteSiteHistoryReady) {
-    const knownFavoriteUrls = new Set(favoriteSiteHistoryItems.map((item) => item.url));
-    for (const item of normalizeHistorySnapshotItems(items, favoriteBookmarkedSites)) {
-      if (!knownFavoriteUrls.has(item.url)) {
-        knownFavoriteUrls.add(item.url);
-        favoriteSiteHistoryItems.push(item);
-      }
-    }
-    favoriteSiteHistoryItems.sort((first, second) => second.lastVisitTime - first.lastVisitTime);
-  }
   updateHistoryFilterOptions();
   updateHistoryFilterStatus();
   updateLoadMoreHistoryButton();
@@ -3811,7 +3882,11 @@ function needsThumbnailLoad(card) {
     (card.posterVersion < POSTER_QUALITY_VERSION || !card.imageFrame.querySelector("img"));
 }
 
-async function loadPagePreviews(cards = historyCards, prioritizedUrls = []) {
+async function loadPagePreviews(cards = historyCards, prioritizedUrls = [], statusElement = historyStatus) {
+  const updatesHistoryControls = statusElement === historyStatus;
+  const checkingMessage = updatesHistoryControls
+    ? "Checking recent pages for preview images…"
+    : "Checking favorite-site pages for previews…";
   const cardsToCheck = cards.filter(needsPagePreviewCheck);
   const permittedCards = [];
   let pagesWithoutPermission = 0;
@@ -3824,7 +3899,7 @@ async function loadPagePreviews(cards = historyCards, prioritizedUrls = []) {
   }
 
   if (permittedCards.length > 0 && !historyFillInProgress) {
-    historyStatus.textContent = "Checking recent pages for preview images…";
+    statusElement.textContent = checkingMessage;
   }
   let metadataChanged = false;
   await forEachWithConcurrency(permittedCards, 3, async (card) => {
@@ -3880,16 +3955,13 @@ async function loadPagePreviews(cards = historyCards, prioritizedUrls = []) {
     }
   }
   if (permittedImageCards.length > 0) {
-    await loadAvailableThumbnails(permittedImageCards, prioritizedUrls);
+    await loadAvailableThumbnails(permittedImageCards, prioritizedUrls, statusElement);
   }
   renderFavoriteSiteVideos();
   renderRandomVideoSection();
 
   const permissionNeeded = pagesWithoutPermission > 0 || imagesWithoutPermission > 0;
   if (permissionNeeded) {
-    previewPhase = "pages";
-    loadPreviewsButton.disabled = false;
-    loadPreviewsButton.textContent = "Load previews";
     const missingAccess = [];
     if (pagesWithoutPermission > 0) {
       missingAccess.push(`${pagesWithoutPermission} page site${pagesWithoutPermission === 1 ? "" : "s"}`);
@@ -3897,24 +3969,41 @@ async function loadPagePreviews(cards = historyCards, prioritizedUrls = []) {
     if (imagesWithoutPermission > 0) {
       missingAccess.push(`${imagesWithoutPermission} image host${imagesWithoutPermission === 1 ? "" : "s"}`);
     }
-    setHistoryApprovalStatus(
-      `${missingAccess.join(" and ")} need access. Select Allow all sites above to load them automatically.`
-    );
+    const message = `${missingAccess.join(" and ")} need access. Select Allow all sites above to load them automatically.`;
+    if (updatesHistoryControls) {
+      previewPhase = "pages";
+      loadPreviewsButton.disabled = false;
+      loadPreviewsButton.textContent = "Load previews";
+      setHistoryApprovalStatus(message);
+    } else {
+      statusElement.textContent = message;
+    }
   } else if (cards.some(needsPagePreviewCheck) || cards.some(needsThumbnailLoad)) {
-    previewPhase = "pages";
-    loadPreviewsButton.disabled = false;
-    loadPreviewsButton.textContent = "Try again";
+    if (updatesHistoryControls) {
+      previewPhase = "pages";
+      loadPreviewsButton.disabled = false;
+      loadPreviewsButton.textContent = "Try again";
+    } else if (statusElement.textContent === checkingMessage) {
+      statusElement.textContent = "";
+    }
   } else {
-    historyStatus.textContent = "";
-    previewPhase = "done";
-    updatePreviewLoadButton();
+    if (updatesHistoryControls) {
+      statusElement.textContent = "";
+      previewPhase = "done";
+      updatePreviewLoadButton();
+    } else if (statusElement.textContent === checkingMessage) {
+      statusElement.textContent = "";
+    }
   }
   return !permissionNeeded;
 }
 
-async function loadAvailableThumbnails(cards, prioritizedUrls = []) {
+async function loadAvailableThumbnails(cards, prioritizedUrls = [], statusElement = historyStatus) {
+  const loadingMessage = statusElement === historyStatus
+    ? "Loading available thumbnails…"
+    : "Loading favorite-site previews…";
   if (!historyFillInProgress) {
-    historyStatus.textContent = "Loading available thumbnails…";
+    statusElement.textContent = loadingMessage;
   }
   await forEachWithConcurrency(cards, 3, async (card) => {
     card.status.textContent = "Loading preview…";
@@ -3948,24 +4037,26 @@ async function loadAvailableThumbnails(cards, prioritizedUrls = []) {
       await browser.storage.local.set({ previewCache: trimmedCache });
     } catch (error) {
       savedLocally = false;
-      historyStatus.textContent = `Previews are showing, but could not save them for next time: ${error.message}`;
+      statusElement.textContent = `Previews are showing, but could not save them for next time: ${error.message}`;
     }
   }
-  if (completeCount === cards.length && savedLocally) {
-    previewPhase = "done";
-    loadPreviewsButton.disabled = true;
-    loadPreviewsButton.textContent = "Posters saved";
-    historyInfoStatus.textContent = `Loaded and saved ${loadedCount} preview${loadedCount === 1 ? "" : "s"}.`;
-  } else {
-    previewPhase = "pages";
-    loadPreviewsButton.disabled = false;
-    loadPreviewsButton.textContent = "Retry previews";
-    if (savedLocally) {
-      historyInfoStatus.textContent = `Loaded ${loadedCount} of ${cards.length} available previews.`;
+  if (statusElement === historyStatus) {
+    if (completeCount === cards.length && savedLocally) {
+      previewPhase = "done";
+      loadPreviewsButton.disabled = true;
+      loadPreviewsButton.textContent = "Posters saved";
+      historyInfoStatus.textContent = `Loaded and saved ${loadedCount} preview${loadedCount === 1 ? "" : "s"}.`;
+    } else {
+      previewPhase = "pages";
+      loadPreviewsButton.disabled = false;
+      loadPreviewsButton.textContent = "Retry previews";
+      if (savedLocally) {
+        historyInfoStatus.textContent = `Loaded ${loadedCount} of ${cards.length} available previews.`;
+      }
     }
   }
-  if (!historyFillInProgress && historyStatus.textContent === "Loading available thumbnails…") {
-    historyStatus.textContent = "";
+  if (!historyFillInProgress && statusElement.textContent === loadingMessage) {
+    statusElement.textContent = "";
   }
 }
 
@@ -4078,9 +4169,12 @@ async function loadBookmarks() {
   renderFavoriteSiteOptions();
   favoriteSiteRowIndex = 0;
   favoriteSiteRows = [];
+  favoriteSiteInitialScanKey = "";
   favoriteSitePreviewAttempts.clear();
   favoriteSiteHistoryLoadVersion += 1;
   favoriteSiteHistoryItems = [];
+  favoriteSiteHistoryHasMoreResults = false;
+  favoriteSiteHistoryOlderEndTime = null;
   favoriteSiteStatus.textContent = "";
   const allowedHistoryItems = historyItems.filter((item) => isBookmarkedWebsite(item.url));
   const historyItemsChanged = allowedHistoryItems.length !== historyItems.length ||
@@ -4243,11 +4337,13 @@ manageDashboardSectionsButton.addEventListener("click", () => {
   document.querySelector("#dashboard-settings").open = false;
 });
 
-closeDashboardSectionArrangerButton.addEventListener("click", () => {
+function closeDashboardSectionArranger() {
   dashboardSectionArranger.hidden = true;
   manageDashboardSectionsButton.setAttribute("aria-expanded", "false");
   document.querySelector("#dashboard-settings > summary").focus();
-});
+}
+
+closeDashboardSectionArrangerButton.addEventListener("click", closeDashboardSectionArranger);
 
 homeButtonEnabledCheckbox.addEventListener("change", async () => {
   const enabled = homeButtonEnabledCheckbox.checked;
@@ -4265,7 +4361,10 @@ homeButtonEnabledCheckbox.addEventListener("change", async () => {
 saveDashboardSectionOrderButton.addEventListener("click", async () => {
   const order = [...dashboardSectionOrderList.children]
     .map((item) => item.dataset.dashboardSection);
-  await saveDashboardSectionOrder(order);
+  const saved = await saveDashboardSectionOrder(order);
+  if (saved) {
+    closeDashboardSectionArranger();
+  }
 });
 
 function closeDashboardTabsAfterLinkOpen(event) {
@@ -4446,6 +4545,11 @@ clearPreviewsButton.addEventListener("click", async () => {
   try {
     await browser.storage.local.set({ previewCache: {} });
     previewCache = {};
+    favoriteSiteInitialScanKey = "";
+    favoriteSitePreviewAttempts.clear();
+    for (const item of favoriteSiteHistoryItems) {
+      item.favoriteSitePreviewChecked = false;
+    }
     randomVideoExploredUrls.clear();
     for (const card of historyCards) {
       card.posterDataUrl = null;
@@ -4554,9 +4658,7 @@ document.addEventListener("visibilitychange", () => {
   updateRandomVideoVisibility();
   if (!document.hidden && !favoriteSiteVideosSection.hidden) {
     observeFavoriteSiteVideoSection();
-    if (favoriteSiteVideosAreVisible) {
-      void scanFavoriteSitePreviews();
-    }
+    maybeLoadInitialFavoriteSitePreviews();
   }
 });
 reducedMotionPreference.addEventListener("change", handleReducedMotionChange);

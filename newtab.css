@@ -88,11 +88,6 @@ select {
   margin: 0;
 }
 
-.dashboard-section-arranger-close {
-  min-height: 28px;
-  padding: 0 10px;
-}
-
 .dashboard-section-order-list {
   display: grid;
   gap: 7px;
@@ -117,6 +112,10 @@ select {
     opacity var(--hover-transition-duration) var(--ease-smooth);
   touch-action: none;
   user-select: none;
+}
+
+.dashboard-section-order-item > span {
+  color: #fff;
 }
 
 .dashboard-section-order-item:hover:not(.is-dragging) {
@@ -146,6 +145,7 @@ select {
 .dashboard-section-order-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
   margin-top: 9px;
 }
 
@@ -690,7 +690,15 @@ body {
 .dashboard-header .bookmark-actions {
   min-width: 0;
   max-width: 100%;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+}
+
+#enable-automatic-previews {
+  border-color: var(--gold);
+}
+
+#enable-automatic-previews:hover:not(:disabled) {
+  border-color: var(--gold);
 }
 
 .dashboard-header .folder-picker {
@@ -1031,6 +1039,8 @@ body {
 
 .favorite-site-row-controls {
   flex: 0 0 auto;
+  min-width: 74px;
+  justify-content: flex-end;
 }
 
 .favorite-site-picker select {
@@ -1054,6 +1064,11 @@ body {
 .favorite-site-row-controls,
 .random-video-heading-controls {
   gap: 6px;
+}
+
+.favorite-site-row-nav[aria-disabled="true"] {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .random-video-heading-row {
@@ -1300,6 +1315,10 @@ body {
   font-size: 10px;
 }
 
+#favorite-site-status {
+  min-height: 1.3em;
+}
+
 .empty-state {
   padding: 14px 0;
   color: #858992;
@@ -1316,6 +1335,10 @@ body {
 }
 
 html.history-pagination-loading {
+  overflow-anchor: none;
+}
+
+html.favorite-site-row-loading {
   overflow-anchor: none;
 }
 

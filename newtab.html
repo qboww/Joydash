@@ -60,11 +60,11 @@
           <div id="dashboard-section-arranger" class="dashboard-section-arranger" hidden>
             <div class="dashboard-section-arranger-heading">
               <p class="dashboard-section-arranger-title">Drag sections or use Up/Down, then save your order.</p>
-              <button id="close-dashboard-section-arranger" class="text-button dashboard-section-arranger-close" type="button">Close</button>
             </div>
             <ol id="dashboard-section-order-list" class="dashboard-section-order-list"></ol>
             <div class="dashboard-section-order-actions">
               <button id="save-dashboard-section-order" class="text-button" type="button" disabled>Save order</button>
+              <button id="close-dashboard-section-arranger" class="text-button" type="button">Close</button>
             </div>
             <p id="dashboard-section-order-status" class="dashboard-section-order-status" role="status" aria-live="polite"></p>
           </div>
@@ -124,7 +124,7 @@
                 <div class="automatic-history-heading favorite-site-video-heading-row">
                   <div>
                     <h3 id="favorite-site-videos-heading">From your favorite sites</h3>
-                    <p>Choose one site or browse all bookmarked sites; use the arrows to move between preview rows.</p>
+                    <p>Choose a site or browse all bookmarked sites; previews load in visit order as you move between rows.</p>
                   </div>
                   <div class="favorite-site-toolbar">
                     <label class="favorite-site-picker">
@@ -134,7 +134,7 @@
                       </select>
                     </label>
                     <div class="favorite-site-row-controls">
-                      <button id="favorite-site-previous-row" class="favorite-site-row-nav" type="button" aria-label="Show previous row of favorite-site previews" title="Previous row" hidden>‹</button>
+                      <button id="favorite-site-previous-row" class="favorite-site-row-nav" type="button" aria-label="Show previous row of favorite-site previews" title="Previous row" aria-disabled="true">‹</button>
                       <button id="favorite-site-next-row" class="favorite-site-row-nav" type="button" aria-label="Show next row of favorite-site previews" title="Next row" hidden>›</button>
                     </div>
                   </div>

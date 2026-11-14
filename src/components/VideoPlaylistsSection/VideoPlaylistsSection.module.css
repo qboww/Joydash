@@ -1,0 +1,89 @@
+.heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.heading > div:first-child {
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+.controls {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.picker {
+  min-width: 150px;
+  display: grid;
+  gap: 4px;
+  color: #a4a9b2;
+  font-size: 9px;
+}
+
+.createForm {
+  display: flex;
+  gap: 6px;
+}
+
+.createForm input {
+  width: 150px;
+}
+
+.controls :global(.text-button) {
+  min-height: 34px;
+}
+
+.controls :global(.text-button:disabled) {
+  opacity: 0.45;
+}
+
+.controls :global(.text-button:hover:not(:disabled)),
+.controls :global(.text-button:focus-visible),
+.controls :global(.form-control:hover:not(:disabled)),
+.controls :global(.form-control:focus-visible) {
+  border-color: #fff;
+}
+
+.controls :global(.form-control) {
+  transition: border-color var(--border-transition-duration) var(--ease-smooth);
+}
+
+.grid {
+  padding-top: 6px;
+}
+
+.empty {
+  margin: 0 0 14px;
+  color: #858992;
+  font-size: 11px;
+}
+
+@media (max-width: 760px) {
+  .heading {
+    align-items: flex-start;
+  }
+
+  .controls {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .picker {
+    flex: 1 1 120px;
+  }
+
+  .createForm {
+    flex: 1 1 100%;
+  }
+
+  .createForm input {
+    flex: 1 1 auto;
+  }
+}

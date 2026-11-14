@@ -2,6 +2,7 @@ if (!globalThis.__joydashHomeButtonInstalled) {
   globalThis.__joydashHomeButtonInstalled = true;
 
   const host = document.createElement("div");
+  host.hidden = true;
   const shadowRoot = host.attachShadow({ mode: "closed" });
   const style = document.createElement("style");
   style.textContent = `
@@ -56,14 +57,12 @@ if (!globalThis.__joydashHomeButtonInstalled) {
       cursor: progress;
     }
 
-    svg {
+    .home-icon {
       width: 20px;
       height: 20px;
-      fill: none;
-      stroke: currentColor;
-      stroke-linecap: round;
-      stroke-linejoin: round;
-      stroke-width: 1.8;
+      display: block;
+      object-fit: contain;
+      pointer-events: none;
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -77,13 +76,37 @@ if (!globalThis.__joydashHomeButtonInstalled) {
   button.type = "button";
   button.setAttribute("aria-label", "Return to Joydash home page");
   button.title = "Return to Joydash";
-  button.innerHTML = `
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="m3 10 9-7 9 7"></path>
-      <path d="M5 9v12h14V9"></path>
-      <path d="M9 21v-7h6v7"></path>
-    </svg>
-  `;
+  const icon = document.createElement("img");
+  icon.className = "home-icon";
+  icon.src = browser.runtime.getURL("icons/ui/home.svg");
+  icon.alt = "";
+  icon.setAttribute("aria-hidden", "true");
+  button.append(icon);
+  let homeButtonEnabled = false;
+  let isFullscreen = false;
+  const updateHomeButtonVisibility = () => {
+    host.hidden = !homeButtonEnabled || !isFullscreen || Boolean(document.fullscreenElement);
+  };
+  let fullscreenPortConnected = true;
+  const fullscreenPort = browser.runtime.connect({ name: "joydash-home-button" });
+  fullscreenPort.onMessage.addListener((message) => {
+    if (message?.type !== "joydash:fullscreen-state") {
+      return;
+    }
+    isFullscreen = message.fullscreen === true;
+    updateHomeButtonVisibility();
+  });
+  document.addEventListener("fullscreenchange", updateHomeButtonVisibility);
+  fullscreenPort.onDisconnect.addListener(() => {
+    fullscreenPortConnected = false;
+    isFullscreen = false;
+    updateHomeButtonVisibility();
+  });
+  window.addEventListener("resize", () => {
+    if (fullscreenPortConnected) {
+      fullscreenPort.postMessage({ type: "joydash:refresh-fullscreen-state" });
+    }
+  });
   button.addEventListener("click", async (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -111,12 +134,14 @@ if (!globalThis.__joydashHomeButtonInstalled) {
       return;
     }
     homeButtonPreferenceChanged = true;
-    host.hidden = changes.showHomeButton.newValue === false;
+    homeButtonEnabled = changes.showHomeButton.newValue !== false;
+    updateHomeButtonVisibility();
   });
   browser.storage.local.get("showHomeButton")
     .then((preferences) => {
       if (!homeButtonPreferenceChanged) {
-        host.hidden = preferences.showHomeButton === false;
+        homeButtonEnabled = preferences.showHomeButton !== false;
+        updateHomeButtonVisibility();
       }
     })
     .catch((error) => console.error("Could not read the Joydash Home button setting:", error));

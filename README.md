@@ -1,6 +1,6 @@
 # Joydash
 
-Joydash is a Firefox home-page dashboard for bookmarks, recent history, and video or page previews from bookmarked sites.
+Joydash is a React-based Firefox home-page extension for bookmarks, recent history, and video or page previews from bookmarked sites.
 
 ## Features
 
@@ -10,20 +10,30 @@ Joydash is a Firefox home-page dashboard for bookmarks, recent history, and vide
 - Search and filter history by site and date.
 - Browse preview rows from all bookmarked sites or focus on one site at a time.
 - Rotate two random saved posters with smooth transitions, hover feedback, and short back/forward history; play muted direct clips when available and reduced motion is off.
+- Save video previews from dashboard sections into Watch later or custom playlists.
 - Start the dashboard covered on its first opening each Firefox session when discreet mode is enabled.
 - See video previews and open recent pages from the history panel.
 - Keep favorite bookmarks in a compact, scrollable shelf.
 - Cache history and preview data locally in Firefox.
 
-## Try it in Firefox
+## Frontend structure
 
-Firefox 140 or later is required.
+- React components live in feature folders under `src/components/`; component-owned styles use a colocated CSS Module.
+- `src/styles/dashboard.css` holds shared theme tokens, resets, controls, and styles that still serve the legacy dashboard/controller.
+- Move styles into a component module as that component is migrated; keep shared styles in one place rather than copying them or creating empty modules.
+- `src/legacyController.js` still renders some dynamic cards and expects stable DOM IDs, so keep its markup hooks unchanged until those features are migrated.
 
-1. Open `about:debugging#/runtime/this-firefox`.
-2. Select **Load Temporary Add-on...** and choose this folder's `manifest.json`.
-3. Approve the bookmarks and history permissions.
-4. Open Firefox's home page and choose a bookmark folder.
-5. Grant site access when prompted to load previews and favicons. **Allow all sites** grants broad optional host access; you can also grant access site by site.
+## Build and try it in Firefox
+
+Node.js 20.19 or later and Firefox 140 or later are required.
+
+1. Run `npm install`.
+2. Run `npm run build`.
+3. Open `about:debugging#/runtime/this-firefox`.
+4. Select **Load Temporary Add-on...** and choose `dist/manifest.json`. After building, the root `manifest.json` also works and loads the built page from `dist`.
+5. Approve the bookmarks and history permissions.
+6. Open Firefox's home page and choose a bookmark folder.
+7. Grant site access when prompted to load previews and favicons. **Allow all sites** grants broad optional host access; you can also grant access site by site.
 
 Temporary add-ons are removed when Firefox closes. Install a signed add-on to keep Joydash installed across restarts. Joydash sets the home page; it does not replace new tabs.
 
@@ -35,4 +45,4 @@ For details on filtering, caching, permissions, and request limits, see [Behavio
 
 ## Credits
 
-The Joydash monkey and settings icons are from [Icons8](https://icons8.com/).
+The Joydash monkey and interface icons are from [Icons8](https://icons8.com/).

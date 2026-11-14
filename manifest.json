@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Joydash",
-  "version": "1.10.38",
+  "version": "1.10.39",
   "description": "Firefox home page for bookmarks, history, and video/page previews. Approved sites receive requested URLs and your IP; no data goes to the developer.",
   "icons": {
     "16": "icons/homeboard-16.png",
@@ -11,11 +11,12 @@
   },
   "permissions": ["storage", "bookmarks", "history"],
   "optional_permissions": ["<all_urls>"],
+  "web_accessible_resources": ["icons/ui/home.svg"],
   "background": {
     "scripts": ["background.js"]
   },
   "chrome_settings_overrides": {
-    "homepage": "newtab.html"
+    "homepage": "dist/newtab.html"
   },
   "browser_specific_settings": {
     "gecko": {

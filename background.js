@@ -1,6 +1,10 @@
 let homeButtonRegistration = null;
 let homeButtonRegistrationUpdate = Promise.resolve();
 const dashboardHomeTabs = new Map();
+const homeButtonPorts = new Set();
+const homeButtonPortFullscreenStates = new Map();
+const dashboardHomePage = browser.runtime.getManifest().chrome_settings_overrides.homepage;
+const dashboardHomeUrl = browser.runtime.getURL(dashboardHomePage);
 
 async function updateHomeButtonRegistration() {
   const [hasAllSitesAccess, preferences] = await Promise.all([
@@ -29,6 +33,29 @@ function refreshHomeButtonRegistration() {
     });
 }
 
+function updateHomeButtonPortFullscreenState(port, currentWindow) {
+  const windowId = port.sender.tab?.windowId;
+  if (typeof windowId !== "number") {
+    return;
+  }
+  const windowPromise = currentWindow?.id === windowId
+    ? Promise.resolve(currentWindow)
+    : browser.windows.get(windowId);
+  windowPromise.then((browserWindow) => {
+    if (!homeButtonPorts.has(port)) {
+      return;
+    }
+    const fullscreen = browserWindow.state === "fullscreen";
+    if (homeButtonPortFullscreenStates.get(port) === fullscreen) {
+      return;
+    }
+    homeButtonPortFullscreenStates.set(port, fullscreen);
+    port.postMessage({ type: "joydash:fullscreen-state", fullscreen });
+  }).catch((error) => {
+    console.error("Could not check the Joydash Home button window state:", error);
+  });
+}
+
 browser.permissions.onAdded.addListener(refreshHomeButtonRegistration);
 browser.permissions.onRemoved.addListener(refreshHomeButtonRegistration);
 browser.storage.onChanged.addListener((changes, area) => {
@@ -37,8 +64,25 @@ browser.storage.onChanged.addListener((changes, area) => {
   }
 });
 browser.runtime.onConnect.addListener((port) => {
+  if (port.name === "joydash-home-button") {
+    if (typeof port.sender.tab?.windowId !== "number") {
+      return;
+    }
+    homeButtonPorts.add(port);
+    updateHomeButtonPortFullscreenState(port);
+    port.onMessage.addListener((message) => {
+      if (message?.type === "joydash:refresh-fullscreen-state") {
+        updateHomeButtonPortFullscreenState(port);
+      }
+    });
+    port.onDisconnect.addListener(() => {
+      homeButtonPorts.delete(port);
+      homeButtonPortFullscreenStates.delete(port);
+    });
+    return;
+  }
   if (port.name !== "joydash-dashboard-page" ||
-      port.sender.url !== browser.runtime.getURL("newtab.html") ||
+      port.sender.url !== dashboardHomeUrl ||
       typeof port.sender.tab?.id !== "number") {
     return;
   }
@@ -57,15 +101,27 @@ browser.runtime.onConnect.addListener((port) => {
     }
   });
 });
+if (browser.windows.onBoundsChanged) {
+  browser.windows.onBoundsChanged.addListener((browserWindow) => {
+    for (const port of homeButtonPorts) {
+      updateHomeButtonPortFullscreenState(port, browserWindow);
+    }
+  });
+}
 browser.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === "joydash:close-dashboard-tabs") {
-    if (sender.url !== browser.runtime.getURL("newtab.html") ||
+    if (sender.url !== dashboardHomeUrl ||
         typeof sender.tab?.id !== "number") {
       throw new Error("Only Joydash pages can close Joydash tabs.");
     }
-    const tabIds = new Set(dashboardHomeTabs.keys());
-    tabIds.add(sender.tab.id);
-    return browser.tabs.remove([...tabIds]).then(() => ({ ok: true }));
+    return browser.windows.get(sender.tab.windowId).then((browserWindow) => {
+      if (browserWindow.state !== "fullscreen") {
+        return { ok: true, closed: false };
+      }
+      const tabIds = new Set(dashboardHomeTabs.keys());
+      tabIds.add(sender.tab.id);
+      return browser.tabs.remove([...tabIds]).then(() => ({ ok: true, closed: true }));
+    });
   }
   if (message?.type !== "joydash:return-home") {
     return undefined;
@@ -73,9 +129,14 @@ browser.runtime.onMessage.addListener((message, sender) => {
   if (typeof sender.tab?.id !== "number") {
     throw new Error("The Joydash home button requires a browser tab.");
   }
-  return browser.tabs.update(sender.tab.id, {
-    url: browser.runtime.getURL("newtab.html")
-  }).then(() => ({ ok: true }));
+  return browser.windows.get(sender.tab.windowId).then((browserWindow) => {
+    if (browserWindow.state !== "fullscreen") {
+      return { ok: false, reason: "fullscreen-required" };
+    }
+    return browser.tabs.update(sender.tab.id, {
+      url: dashboardHomeUrl
+    }).then(() => ({ ok: true }));
+  });
 });
 
 refreshHomeButtonRegistration();

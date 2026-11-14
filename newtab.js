@@ -224,11 +224,19 @@ function updateDiscreetModeUI() {
 async function initializeDiscreetMode() {
   const [preferences, session] = await Promise.all([
     browser.storage.local.get(["discreetModeEnabled", "showHomeButton"]),
-    browser.storage.session.get("discreetCoverActive")
+    browser.storage.session.get(["discreetCoverActive", "discreetModeInitialized"])
   ]);
   discreetModeEnabled = preferences.discreetModeEnabled !== false;
   homeButtonEnabledCheckbox.checked = preferences.showHomeButton !== false;
-  discreetCoverActive = discreetModeEnabled && session.discreetCoverActive === true;
+  if (session.discreetModeInitialized === true) {
+    discreetCoverActive = discreetModeEnabled && session.discreetCoverActive === true;
+  } else {
+    discreetCoverActive = discreetModeEnabled;
+    await browser.storage.session.set({
+      discreetCoverActive,
+      discreetModeInitialized: true
+    });
+  }
   discreetModeInitialized = true;
   updateDiscreetModeUI();
 }

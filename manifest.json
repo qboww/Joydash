@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Joydash",
-  "version": "1.10.39",
+  "version": "2.0.0",
   "description": "Firefox home page for bookmarks, history, and video/page previews. Approved sites receive requested URLs and your IP; no data goes to the developer.",
   "icons": {
     "16": "icons/homeboard-16.png",
@@ -20,11 +20,14 @@
   },
   "browser_specific_settings": {
     "gecko": {
-      "id": "quiet-start@example.invalid",
+      "id": "joydash-public@qboww.invalid",
       "strict_min_version": "140.0",
       "data_collection_permissions": {
         "required": ["bookmarksInfo", "browsingActivity", "websiteContent"]
       }
+    },
+    "gecko_android": {
+      "strict_min_version": "142.0"
     }
   }
 }

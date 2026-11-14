@@ -32,7 +32,12 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
     rollupOptions: {
-      input: resolve(projectRoot, "newtab.html")
+      input: resolve(projectRoot, "newtab.html"),
+      output: {
+        entryFileNames: (chunk) => `assets/${chunk.name.toLowerCase()}.js`,
+        chunkFileNames: (chunk) => `assets/${chunk.name.toLowerCase()}.js`,
+        assetFileNames: (asset) => `assets/${asset.name.toLowerCase()}`
+      }
     }
   }
 });

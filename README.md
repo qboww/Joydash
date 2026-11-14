@@ -15,6 +15,7 @@ Joydash is a React-based Firefox home-page extension for bookmarks, recent histo
 - See video previews and open recent pages from the history panel.
 - Keep favorite bookmarks in a compact, scrollable shelf.
 - Cache history and preview data locally in Firefox.
+- Support Firefox for Android with a responsive dashboard layout.
 
 ## Frontend structure
 
@@ -23,7 +24,7 @@ Joydash is a React-based Firefox home-page extension for bookmarks, recent histo
 - Move styles into a component module as that component is migrated; keep shared styles in one place rather than copying them or creating empty modules.
 - `src/legacyController.js` still renders some dynamic cards and expects stable DOM IDs, so keep its markup hooks unchanged until those features are migrated.
 
-## Build and try it in Firefox
+## Build and try it in Firefox for desktop
 
 Node.js 20.19 or later and Firefox 140 or later are required.
 
@@ -36,6 +37,21 @@ Node.js 20.19 or later and Firefox 140 or later are required.
 7. Grant site access when prompted to load previews and favicons. **Allow all sites** grants broad optional host access; you can also grant access site by site.
 
 Temporary add-ons are removed when Firefox closes. Install a signed add-on to keep Joydash installed across restarts. Joydash sets the home page; it does not replace new tabs.
+
+To create the Mozilla Add-ons upload package, run `npm run package:amo` and upload the generated ZIP from `web-ext-artifacts/public/`. This uses Mozilla's `web-ext` packager; do not create the upload ZIP with Windows `Compress-Archive`, which may put backslashes in ZIP paths that AMO rejects.
+
+## Use Joydash in Firefox for Android
+
+Firefox for Android 142 or later is required.
+
+1. Install the Android-compatible signed release from its Mozilla Add-ons page in Firefox for Android.
+2. Open Firefox's home page and choose a bookmark folder.
+3. Approve the bookmarks and history permissions.
+4. Grant site access when prompted to load previews and favicons. You can allow access site by site.
+
+Joydash is designed for the browser home page, not new tabs. Its layout adapts to narrow screens; browser-specific controls such as the desktop window fullscreen Home button are not part of the Android workflow.
+
+To temporarily run the extension from source while developing, use Mozilla's [Firefox for Android extension guide](https://extensionworkshop.com/documentation/develop/developing-extensions-for-firefox-for-android/), which covers `web-ext run -t firefox-android` and device setup.
 
 ## Privacy
 

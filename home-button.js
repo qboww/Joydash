@@ -4,7 +4,6 @@ if (!globalThis.__joydashHomeButtonInstalled) {
   const host = document.createElement("div");
   host.hidden = true;
   const shadowRoot = host.attachShadow({ mode: "closed" });
-  const coverStyles = document.createElement("style");
   const style = document.createElement("style");
   style.textContent = `
     :host {
@@ -70,6 +69,57 @@ if (!globalThis.__joydashHomeButtonInstalled) {
       cursor: progress;
     }
 
+    .discreet-cover {
+      box-sizing: border-box;
+      min-height: 100vh;
+      padding: 24px;
+      display: grid;
+      place-items: center;
+      position: fixed;
+      z-index: 10000;
+      inset: 0;
+      background: #080808;
+      color: #f7f0eb;
+      font-family: Roboto, "Segoe UI", Arial, sans-serif;
+    }
+
+    .discreet-cover[hidden] {
+      display: none;
+    }
+
+    .discreet-cover-panel {
+      box-sizing: border-box;
+      width: min(380px, 100%);
+      padding: 28px;
+      border: 1px solid rgba(235, 206, 171, 0.18);
+      border-radius: 16px;
+      background: #0e0e0e;
+      text-align: center;
+    }
+
+    .discreet-cover .eyebrow {
+      margin: 0 0 7px;
+      color: #c99c72;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.24em;
+      text-transform: uppercase;
+    }
+
+    .discreet-cover-panel h1 {
+      margin: 0;
+      font-size: clamp(24px, 5vw, 34px);
+      font-weight: 400;
+      letter-spacing: -0.035em;
+    }
+
+    .discreet-cover-panel > p:not(.eyebrow) {
+      margin: 10px 0 18px;
+      color: #8b9099;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
     .home-icon {
       width: 20px;
       height: 20px;
@@ -111,21 +161,7 @@ if (!globalThis.__joydashHomeButtonInstalled) {
   button.append(icon);
   buttonStack.append(coverButton, button);
 
-  const { element: coverScreen, status: coverStatus } = globalThis.JoydashDiscreetCover.create(document);
-  fetch(browser.runtime.getURL("discreet-cover.css"))
-    .then((response) => {
-      if (!response.ok) {
-        throw new Error(`Stylesheet request returned ${response.status}.`);
-      }
-      return response.text();
-    })
-    .then((css) => {
-      coverStyles.textContent = css;
-    })
-    .catch((error) => {
-      console.error("Could not load the Joydash discreet-cover styles:", error);
-      coverStatus.textContent = `Could not load cover styles: ${error.message}`;
-    });
+  const { element: coverScreen } = globalThis.JoydashDiscreetCover.create(document);
 
   let homeButtonEnabled = false;
   let isFullscreen = false;
@@ -282,8 +318,26 @@ if (!globalThis.__joydashHomeButtonInstalled) {
     }
   }, true);
 
-  shadowRoot.append(style, coverStyles, buttonStack, coverScreen);
-  document.documentElement.append(host);
+  shadowRoot.append(style, buttonStack, coverScreen);
+  const appendHost = () => {
+    if (!document.documentElement) {
+      return false;
+    }
+    document.documentElement.append(host);
+    updateHomeButtonVisibility();
+    if (shouldShowDiscreetCover()) {
+      coverScreen.focus();
+    }
+    return true;
+  };
+  if (!appendHost()) {
+    const rootObserver = new MutationObserver(() => {
+      if (appendHost()) {
+        rootObserver.disconnect();
+      }
+    });
+    rootObserver.observe(document, { childList: true });
+  }
 
   let homeButtonPreferenceChanged = false;
   browser.storage.onChanged.addListener((changes, area) => {

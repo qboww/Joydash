@@ -175,7 +175,7 @@ async function updateHomeButtonRegistration() {
         { file: "discreet-cover-component.js" },
         { file: "home-button.js" }
       ],
-      runAt: "document_idle"
+      runAt: "document_start"
     });
   } else if (!shouldRegister && homeButtonRegistration) {
     const registration = homeButtonRegistration;

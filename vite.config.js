@@ -14,6 +14,14 @@ function copyExtensionRuntimeFiles() {
       for (const file of ["background.js", "home-button.js", "favicon.ico"]) {
         copyFileSync(resolve(projectRoot, file), resolve(outputDirectory, file));
       }
+      copyFileSync(
+        resolve(projectRoot, "discreet-cover-component.js"),
+        resolve(outputDirectory, "discreet-cover-component.js")
+      );
+      copyFileSync(
+        resolve(projectRoot, "discreet-cover.css"),
+        resolve(outputDirectory, "discreet-cover.css")
+      );
       const manifest = JSON.parse(readFileSync(resolve(projectRoot, "manifest.json"), "utf8"));
       manifest.chrome_settings_overrides.homepage = "newtab.html";
       writeFileSync(

@@ -11,7 +11,11 @@
   },
   "permissions": ["storage", "bookmarks", "history"],
   "optional_permissions": ["<all_urls>"],
-  "web_accessible_resources": ["icons/ui/home.svg"],
+  "web_accessible_resources": [
+    "icons/ui/home.svg",
+    "icons/ui/hide.svg",
+    "discreet-cover.css"
+  ],
   "background": {
     "scripts": ["background.js"]
   },

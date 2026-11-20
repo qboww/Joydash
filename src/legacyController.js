@@ -1,3 +1,13 @@
+import { createDiscreetModeController } from "./controllers/discreetModeController.js";
+import { createPreviewPageParser } from "./services/previewPageParser.js";
+import {
+  fetchPreviewResponse,
+  forEachWithConcurrency
+} from "./services/previewRequests.js";
+
+const { findPagePreviewImageUrl, findDirectVideoUrl, findThumbnailUrl } =
+  createPreviewPageParser({ getHistoryUrl, isSafeVideoSourceUrl });
+
 if ("scrollRestoration" in window.history) {
   window.history.scrollRestoration = "manual";
 }
@@ -66,6 +76,7 @@ const randomVideoSlots = [1, 2].map((slotNumber) => {
     element,
     link: element.querySelector(".random-video-slot-link"),
     addButton: element.querySelector(".random-video-playlist-add"),
+    deleteButton: element.querySelector(".random-video-history-delete"),
     player,
     previousPoster: document.querySelector(`#random-video-previous-poster-${slotNumber}`),
     poster: document.querySelector(`#random-video-poster-${slotNumber}`),
@@ -85,22 +96,19 @@ const historyHoverPreviewImage = document.querySelector("#history-hover-preview-
 const historyHoverPreviewTitle = document.querySelector("#history-hover-preview-title");
 const historyHoverPreviewMessage = document.querySelector("#history-hover-preview-message");
 const historyHoverPreviewSaveButton = document.querySelector("#history-hover-preview-save");
+const historyHoverPreviewDeleteButton = document.querySelector("#history-hover-preview-delete");
 const clearPreviewsButton = document.querySelector("#clear-previews");
 const loadPreviewsButton = document.querySelector("#load-previews");
-const discreetModeToggleButton = document.querySelector("#toggle-discreet-mode");
-const discreetModeEnabledCheckbox = document.querySelector("#discreet-mode-enabled");
-const discreetCover = document.querySelector("#discreet-cover");
-const discreetCoverStatus = document.querySelector("#discreet-cover-status");
-const revealDiscreetCoverButton = document.querySelector("#reveal-discreet-cover");
-const disableDiscreetModeButton = document.querySelector("#disable-discreet-mode");
-const dashboardPage = document.querySelector(".page");
-const dashboardPagePort = browser.runtime.connect({ name: "joydash-dashboard-page" });
 
 let bookmarkFolders = [];
 let selectedBookmarkFolderId = "";
 let allSitesPermissionGranted = false;
 let bookmarkGroups = [];
 let bookmarkedSites = new Map();
+let bookmarkRedirectAliases = {};
+const redirectRepairPromises = new Map();
+const redirectedBookmarkIds = new Set();
+let bookmarkAliasUpdateQueue = Promise.resolve();
 let automaticSectionsDataReady = false;
 let automaticSectionsInitialRevealComplete = false;
 let automaticSectionRevealInProgress = false;
@@ -151,11 +159,10 @@ let videoPlaylistSessionPosters = new Map();
 let previewCacheClearVersion = 0;
 let previewCacheClearedByUser = false;
 let pendingVideoPlaylistItem = null;
-let discreetModeEnabled = true;
-let discreetCoverActive = false;
-let discreetModeInitialized = false;
 let historySnapshot = null;
 let historySnapshotNeedsRefresh = false;
+const pendingHistoryDeleteUrls = new Set();
+const pendingHistoryDeleteTimers = new Map();
 let randomVideoObserver = null;
 let randomVideoIsVisible = false;
 let randomVideoVisibilityEventsAttached = false;
@@ -181,6 +188,8 @@ let previewPhase = "pages";
 let refreshTimer;
 let historyRefreshTimer;
 const MAX_HISTORY_RESULTS = 500;
+const MAX_REDIRECT_HISTORY_CANDIDATES = 12;
+const MAX_REDIRECT_HISTORY_SEARCH_RESULTS = 5_000;
 const MAX_PREVIEW_METADATA = 250;
 const HISTORY_GROUP_PAGE_BATCH = 5;
 const MAX_HISTORY_SCAN_ITEMS = 80;
@@ -207,6 +216,22 @@ const MAX_FAVICON_BYTES = 256 * 1024;
 const MAX_FAVICON_CACHE = 64;
 const BOOKMARKS_TIMEOUT_MS = 5_000;
 
+const discreetMode = createDiscreetModeController({
+  browser,
+  document,
+  dashboardPage: document.querySelector(".page"),
+  historyHoverPreview,
+  toggleButton: document.querySelector("#toggle-discreet-mode"),
+  enabledCheckbox: document.querySelector("#discreet-mode-enabled"),
+  favoritePagesCheckbox: document.querySelector("#cover-favorite-pages-enabled"),
+  contextSelect: document.querySelector("#discreet-mode-context"),
+  cover: document.querySelector("#discreet-cover"),
+  status: document.querySelector("#discreet-cover-status"),
+  homeButtonCheckbox: homeButtonEnabledCheckbox,
+  historyStatus,
+  onCoverChange: updateRandomVideoPlayback
+});
+
 for (const slot of randomVideoSlots) {
   slot.link.addEventListener("click", handleRandomVideoSlotClick);
   slot.addButton.addEventListener("click", (event) => {
@@ -214,6 +239,13 @@ for (const slot of randomVideoSlots) {
     event.stopPropagation();
     if (slot.currentItem) {
       openAddToPlaylistDialog({ ...slot.currentItem, videoPage: true });
+    }
+  });
+  slot.deleteButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (slot.currentItem) {
+      void deleteHistoryEntry(slot.currentItem.url, slot.deleteButton);
     }
   });
 }
@@ -230,77 +262,6 @@ async function withTimeout(promise, timeoutMs, message) {
   } finally {
     clearTimeout(timeoutId);
   }
-}
-
-function updateDiscreetModeUI() {
-  discreetModeToggleButton.hidden = !discreetModeEnabled;
-  discreetModeToggleButton.setAttribute("aria-pressed", String(discreetCoverActive));
-  discreetCover.hidden = !discreetCoverActive;
-  revealDiscreetCoverButton.hidden = !discreetCoverActive;
-  disableDiscreetModeButton.hidden = !discreetCoverActive;
-  discreetModeEnabledCheckbox.checked = discreetModeEnabled;
-  dashboardPage.inert = discreetCoverActive;
-  historyHoverPreview.inert = discreetCoverActive;
-  discreetCoverStatus.textContent = discreetCoverActive
-    ? "Your dashboard stays covered until you reveal it or Firefox closes."
-    : "";
-  updateRandomVideoPlayback();
-}
-
-async function initializeDiscreetMode() {
-  const [preferences, session] = await Promise.all([
-    browser.storage.local.get(["discreetModeEnabled", "showHomeButton"]),
-    browser.storage.session.get(["discreetCoverActive", "discreetModeInitialized"])
-  ]);
-  discreetModeEnabled = preferences.discreetModeEnabled !== false;
-  homeButtonEnabledCheckbox.checked = preferences.showHomeButton !== false;
-  if (session.discreetModeInitialized === true) {
-    discreetCoverActive = discreetModeEnabled && session.discreetCoverActive === true;
-  } else {
-    discreetCoverActive = discreetModeEnabled;
-    await browser.storage.session.set({
-      discreetCoverActive,
-      discreetModeInitialized: true
-    });
-  }
-  discreetModeInitialized = true;
-  updateDiscreetModeUI();
-}
-
-async function setDiscreetCover(active) {
-  if (active && !discreetModeEnabled) {
-    return;
-  }
-  await browser.storage.session.set({ discreetCoverActive: active });
-  discreetCoverActive = active;
-  updateDiscreetModeUI();
-  if (active) {
-    revealDiscreetCoverButton.focus();
-  } else {
-    discreetModeToggleButton.focus();
-  }
-}
-
-async function setDiscreetModeEnabled(enabled) {
-  const wasCovered = discreetCoverActive;
-  await browser.storage.session.set({ discreetCoverActive: false });
-  try {
-    await browser.storage.local.set({ discreetModeEnabled: enabled });
-  } catch (error) {
-    if (wasCovered) {
-      try {
-        await browser.storage.session.set({ discreetCoverActive: true });
-      } catch (restoreError) {
-        throw new Error(
-          `Could not save discreet mode: ${error.message}. The cover could not be restored: ${restoreError.message}`
-        );
-      }
-    }
-    throw error;
-  }
-  discreetModeEnabled = enabled;
-  discreetCoverActive = false;
-  updateDiscreetModeUI();
 }
 
 function showBookmarkLoadError(error) {
@@ -333,6 +294,7 @@ function showBookmarkLoadError(error) {
   stopRandomVideoPlayback();
   for (const slot of randomVideoSlots) {
     slot.currentItem = null;
+    slot.deleteButton.hidden = true;
   }
   favoriteHistoryList.replaceChildren();
   favoriteHistoryEmpty.hidden = false;
@@ -658,10 +620,12 @@ function getBookmarkedSites(bookmarks) {
             hostname,
             name: name || hostname,
             nameIsRootPage: isRootPage,
-            origins: new Set([url.origin])
+            origins: new Set([url.origin]),
+            bookmarks: [node]
           });
         } else {
           site.origins.add(url.origin);
+          site.bookmarks.push(node);
           if (isRootPage && name && !site.nameIsRootPage) {
             site.name = name;
             site.nameIsRootPage = true;
@@ -670,7 +634,147 @@ function getBookmarkedSites(bookmarks) {
       }
     }
   }
+  for (const node of bookmarks) {
+    const url = getHistoryUrl(node.url);
+    const site = url ? sites.get(url.hostname.replace(/^www\./i, "")) : null;
+    if (!site) {
+      continue;
+    }
+    for (const origin of bookmarkRedirectAliases[node.id] ?? []) {
+      const aliasUrl = getHistoryUrl(origin);
+      if (!aliasUrl) {
+        continue;
+      }
+      const aliasHostname = aliasUrl.hostname.replace(/^www\./i, "");
+      if (!sites.has(aliasHostname)) {
+        sites.set(aliasHostname, site);
+      }
+    }
+  }
   return sites;
+}
+
+function normalizeBookmarkRedirectAliases(savedAliases, validBookmarkIds = null) {
+  if (!savedAliases || typeof savedAliases !== "object" || Array.isArray(savedAliases)) {
+    return {};
+  }
+  const aliases = {};
+  for (const [bookmarkId, savedOrigins] of Object.entries(savedAliases)) {
+    if ((validBookmarkIds && !validBookmarkIds.has(bookmarkId)) ||
+        !Array.isArray(savedOrigins)) {
+      continue;
+    }
+    const origins = [];
+    for (const origin of savedOrigins.slice(-10)) {
+      if (typeof origin !== "string" || origin.length > 2048) {
+        continue;
+      }
+      try {
+        const url = new URL(origin);
+        if (url.origin === origin &&
+            (url.protocol === "http:" || url.protocol === "https:") &&
+            !url.username &&
+            !url.password &&
+            !origins.includes(origin)) {
+          origins.push(origin);
+        }
+      } catch {
+        continue;
+      }
+    }
+    if (origins.length > 0) {
+      aliases[bookmarkId] = origins;
+    }
+  }
+  return aliases;
+}
+
+function updateBookmarkWithRedirectAlias(bookmark, destination) {
+  const operation = bookmarkAliasUpdateQueue.then(async () => {
+    const saved = await browser.storage.local.get("bookmarkRedirectAliases");
+    const previousAliases = normalizeBookmarkRedirectAliases(saved.bookmarkRedirectAliases);
+    const sourceOrigin = new URL(bookmark.url).origin;
+    const origins = previousAliases[bookmark.id] ?? [];
+    const nextAliases = {
+      ...previousAliases,
+      [bookmark.id]: [...new Set([...origins, sourceOrigin])].slice(-10)
+    };
+    await browser.storage.local.set({ bookmarkRedirectAliases: nextAliases });
+    try {
+      const [currentBookmark] = await browser.bookmarks.get(bookmark.id);
+      if (currentBookmark?.url !== bookmark.url) {
+        await browser.storage.local.set({ bookmarkRedirectAliases: previousAliases });
+        return false;
+      }
+      await browser.bookmarks.update(bookmark.id, { url: destination.href });
+    } catch (error) {
+      try {
+        await browser.storage.local.set({ bookmarkRedirectAliases: previousAliases });
+      } catch (restoreError) {
+        throw new Error(
+          `Could not update the bookmark: ${error.message}. Its previous-domain history alias could not be restored: ${restoreError.message}`
+        );
+      }
+      throw error;
+    }
+    bookmarkRedirectAliases = nextAliases;
+    return true;
+  });
+  bookmarkAliasUpdateQueue = operation.then(() => undefined, () => undefined);
+  return operation;
+}
+
+function addBookmarkRedirectAlias(bookmark, origin) {
+  const operation = bookmarkAliasUpdateQueue.then(async () => {
+    const [currentBookmark] = await browser.bookmarks.get(bookmark.id);
+    if (currentBookmark?.url !== bookmark.url) {
+      return false;
+    }
+    const saved = await browser.storage.local.get("bookmarkRedirectAliases");
+    const previousAliases = normalizeBookmarkRedirectAliases(saved.bookmarkRedirectAliases);
+    const sourceOrigin = new URL(origin).origin;
+    const origins = previousAliases[bookmark.id] ?? [];
+    if (origins.includes(sourceOrigin)) {
+      return false;
+    }
+    const nextAliases = {
+      ...previousAliases,
+      [bookmark.id]: [...origins, sourceOrigin].slice(-10)
+    };
+    const nextMetadata = { ...previewMetadataCache };
+    let metadataChanged = false;
+    for (const url of Object.keys(nextMetadata)) {
+      if (getHistoryUrl(url)?.origin === sourceOrigin) {
+        delete nextMetadata[url];
+        metadataChanged = true;
+      }
+    }
+    const updates = { bookmarkRedirectAliases: nextAliases };
+    if (metadataChanged) {
+      updates.previewMetadataCache = nextMetadata;
+    }
+    await browser.storage.local.set(updates);
+    bookmarkRedirectAliases = nextAliases;
+    if (metadataChanged) {
+      previewMetadataCache = nextMetadata;
+    }
+    return true;
+  });
+  bookmarkAliasUpdateQueue = operation.then(() => undefined, () => undefined);
+  return operation;
+}
+
+function getFavoriteHistorySearchTerms(site) {
+  const ignoredLabels = new Set([
+    "amp", "biz", "com", "co", "de", "edu", "gov", "info", "m", "me",
+    "mobile", "net", "org", "ru", "uk", "us", "www"
+  ]);
+  const hostnameLabels = site.hostname.split(".").slice(0, -1);
+  const nameLabels = site.name.toLowerCase().split(/[^a-z0-9]+/);
+  return [...new Set([...hostnameLabels, ...nameLabels]
+    .map((label) => label.replace(/[^a-z0-9]/g, ""))
+    .filter((label) => label.length >= 4 && !ignoredLabels.has(label)))]
+    .slice(0, 3);
 }
 
 function getBookmarkedSiteHostname(value) {
@@ -1037,7 +1141,7 @@ async function loadBookmarkFavicons() {
     if (originsWithoutPermission > 0) {
       bookmarkStatus.textContent = `${originsWithoutPermission} site${originsWithoutPermission === 1 ? "" : "s"} need access. Select Allow all sites to load their icons automatically.`;
     } else if (failedCount > 0) {
-      bookmarkStatus.textContent = `${failedCount} site icon${failedCount === 1 ? "" : "s"} could not be loaded; those favorites keep their initials.`;
+      bookmarkStatus.textContent = `${failedCount} favorite site icon${failedCount === 1 ? "" : "s"} could not be loaded; Continue history is separate. Update a bookmark if that site changed domains.`;
     } else if (loadedCount > 0) {
       bookmarkStatus.textContent = "";
     }
@@ -1291,7 +1395,9 @@ function renderVideoPlaylists() {
     removeButton.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      void removeVideoFromPlaylist(item.url);
+      removeButton.disabled = true;
+      container.classList.add("is-removing");
+      void removeVideoFromPlaylist(item.url, selectedPlaylist.id, container, removeButton);
     });
     container.append(card, removeButton);
     videoPlaylistGrid.append(container);
@@ -1369,7 +1475,7 @@ function maybeLoadMissingVideoPlaylistPreviews() {
       videoPlaylistsSection.hidden ||
       document.hidden ||
       continueSectionCollapsed ||
-      discreetCoverActive ||
+      discreetMode.isCoverVisible() ||
       historyLoadInProgress ||
       historyInitialBatchLoading ||
       historyFillInProgress ||
@@ -1722,8 +1828,12 @@ async function createVideoPlaylist(name) {
   return true;
 }
 
-async function removeVideoFromPlaylist(url) {
-  const playlist = getSelectedVideoPlaylist();
+async function removeVideoFromPlaylist(url, playlistId, container, button) {
+  await new Promise((resolve) => setTimeout(resolve, 180));
+  const playlist = videoPlaylists.find((entry) => entry.id === playlistId);
+  if (!playlist) {
+    return;
+  }
   const nextPlaylists = videoPlaylists.map((entry) => entry.id === playlist.id
     ? { ...entry, items: entry.items.filter((item) => item.url !== url) }
     : entry);
@@ -1731,6 +1841,8 @@ async function removeVideoFromPlaylist(url) {
     await persistVideoPlaylists(nextPlaylists);
     setVideoPlaylistStatus(`Removed from ${playlist.name}.`, 4000);
   } catch (error) {
+    container.classList.remove("is-removing");
+    button.disabled = false;
     setVideoPlaylistStatus(`Could not update playlist: ${error.message}`);
   }
 }
@@ -1902,6 +2014,7 @@ function createHistoryCard(item) {
     imageFrame,
     status,
     playlistButton: createPlaylistActionButton(item),
+    deleteButton: createHistoryDeleteButton(item),
     imageUrl: cachedMetadata?.imageUrl ?? null,
     metadataCheckedAt: cachedMetadata?.checkedAt ?? 0,
     videoUrl: isFreshVideoSourceCheck(cachedMetadata) ? cachedMetadata.videoUrl : null,
@@ -1909,6 +2022,7 @@ function createHistoryCard(item) {
     videoPage: typeof item.videoPage === "boolean" ? item.videoPage : null
   };
   cardState.playlistButton.hidden = cardState.videoPage !== true;
+  cardState.deleteButton.classList.toggle("delete-history-entry--solo", cardState.playlistButton.hidden);
   historyCards.push(cardState);
   if (cached?.videoPage === true && cached.dataUrl) {
     cardState.posterVersion = cached.posterVersion === POSTER_QUALITY_VERSION ? POSTER_QUALITY_VERSION : 1;
@@ -1916,7 +2030,7 @@ function createHistoryCard(item) {
   }
   content.append(title, details, status);
   card.append(imageFrame, content);
-  container.append(card, cardState.playlistButton);
+  container.append(card, cardState.playlistButton, cardState.deleteButton);
   return container;
 }
 
@@ -2131,9 +2245,17 @@ function updatePreviewLoadButton() {
   const hasCheckedPageWithoutPreview = historyCards.some((card) =>
     getFreshPreviewMetadata(card.item.url) && !card.imageUrl && !card.imageFrame.querySelector("img")
   );
-  loadPreviewsButton.disabled = !hasUncachedPages;
+  const hasFavoriteSitesWithoutHistory = [...bookmarkedSites.values()].some((site) =>
+    !historyItems.some((item) => getBookmarkedSiteHostname(item.url) === site.hostname)
+  );
+  const hasFavoriteSites = new Set(bookmarkedSites.values()).size > 0;
+  loadPreviewsButton.disabled = !hasUncachedPages &&
+    !hasFavoriteSitesWithoutHistory &&
+    !hasFavoriteSites;
   loadPreviewsButton.textContent = hasUncachedPages
     ? "Load previews"
+    : hasFavoriteSitesWithoutHistory || hasFavoriteSites
+      ? "Check favorite redirects"
     : hasCheckedPageWithoutPreview
       ? "Previews checked"
       : historyCards.length > 0 ? "Posters saved" : "No recent pages";
@@ -2213,7 +2335,9 @@ async function fillHistoryBatch(targetVisibleCount, includeExisting = false) {
           Math.min(targetVisibleCount - historyVisibleCount, filteredItems.length - historyVisibleCount)
         );
         if (nextCards.length > 0) {
-          await loadPagePreviews(nextCards);
+          if (!await loadPagePreviews(nextCards)) {
+            return;
+          }
         }
       }
       return;
@@ -2476,6 +2600,7 @@ function renderRandomVideoSection() {
       clearTimeout(slot.transitionTimer);
       slot.element.classList.remove("is-transitioning");
       slot.currentItem = null;
+      slot.deleteButton.hidden = true;
       slot.previousPoster.removeAttribute("src");
       slot.previousPoster.hidden = true;
       slot.poster.removeAttribute("src");
@@ -2741,6 +2866,11 @@ function setRandomVideoPosterItem(slot, item) {
     `Add ${item.title?.trim() || url.hostname} to a playlist`
   );
   slot.addButton.hidden = false;
+  slot.deleteButton.setAttribute(
+    "aria-label",
+    `Delete all visits to ${item.title?.trim() || url.hostname} from Firefox history`
+  );
+  slot.deleteButton.hidden = false;
   slot.poster.src = getCachedPosterForUrl(item.url).dataUrl;
   slot.poster.hidden = false;
   slot.title.textContent = item.title?.trim() || url?.hostname || "";
@@ -2891,7 +3021,7 @@ function canPlayRandomVideo() {
   return randomVideoIsVisible &&
     !document.hidden &&
     !randomVideoHistoryLoadInProgress &&
-    !discreetCoverActive &&
+    !discreetMode.isCoverVisible() &&
     !randomVideoSection.hidden;
 }
 
@@ -3058,6 +3188,7 @@ function hideHistoryHoverPreview() {
   historyHoverPreviewTitle.textContent = "";
   historyHoverPreviewMessage.textContent = "";
   historyHoverPreviewSaveButton.hidden = true;
+  historyHoverPreviewDeleteButton.hidden = true;
 }
 
 function hideHistoryHoverPreviewFor(link) {
@@ -3091,6 +3222,12 @@ function showHistoryHoverPreview(link, item) {
   historyHoverPreviewSaveButton.setAttribute(
     "aria-label",
     `Add ${item.title?.trim() || getHistoryUrl(item.url)?.hostname || "video"} to a playlist`
+  );
+  const itemLabel = item.title?.trim() || getHistoryUrl(item.url)?.hostname || "page";
+  historyHoverPreviewDeleteButton.hidden = false;
+  historyHoverPreviewDeleteButton.setAttribute(
+    "aria-label",
+    `Delete all visits to ${itemLabel} from Firefox history`
   );
   const posterDataUrl = cached?.videoPage === true && cached.dataUrl
     ? cached.dataUrl
@@ -3129,8 +3266,9 @@ function updateHistoryHoverPreview(link, item, dataUrl, message) {
 
   const rect = link.getBoundingClientRect();
   const width = Math.min(280, window.innerWidth - 24);
-  const saveButtonHeight = historyHoverPreviewSaveButton.hidden ? 0 : 44;
-  const height = (dataUrl ? width * 0.5625 + 48 : 104) + saveButtonHeight;
+  const actionButtonsHeight =
+    historyHoverPreviewSaveButton.hidden && historyHoverPreviewDeleteButton.hidden ? 0 : 44;
+  const height = (dataUrl ? width * 0.5625 + 48 : 104) + actionButtonsHeight;
   let left = rect.left - width - 12;
   if (left < 12) {
     left = rect.right + 12;
@@ -3484,6 +3622,57 @@ function normalizeHistorySnapshotItems(items, sites = bookmarkedSites) {
     }));
 }
 
+async function includeRedirectAliasHistory(items) {
+  const aliasOrigins = new Set();
+  for (const site of new Set(bookmarkedSites.values())) {
+    for (const bookmark of site.bookmarks) {
+      for (const origin of bookmarkRedirectAliases[bookmark.id] ?? []) {
+        aliasOrigins.add(origin);
+      }
+    }
+  }
+  if (aliasOrigins.size === 0) {
+    return items;
+  }
+
+  const aliasHistoryItems = [];
+  await forEachWithConcurrency([...aliasOrigins], 3, async (origin) => {
+    const hostname = new URL(origin).hostname;
+    const results = await browser.history.search({
+      text: hostname,
+      startTime: 0,
+      maxResults: MAX_REDIRECT_HISTORY_SEARCH_RESULTS
+    });
+    for (const item of results) {
+      const url = getHistoryUrl(item?.url);
+      if (url &&
+          (url.hostname === hostname || url.hostname.endsWith(`.${hostname}`))) {
+        aliasHistoryItems.push(item);
+      }
+    }
+  });
+
+  const mergedItems = new Map(items.map((item) => [item.url, item]));
+  const supplementalItems = normalizeHistorySnapshotItems(aliasHistoryItems)
+    .filter((item) => !mergedItems.has(item.url))
+    .sort((first, second) => second.lastVisitTime - first.lastVisitTime)
+  const visibleSupplementalItems = supplementalItems.slice(0, MAX_HISTORY_RESULTS);
+  for (const item of visibleSupplementalItems) {
+    mergedItems.set(item.url, item);
+    historySeenUrls.add(item.url);
+  }
+  if (supplementalItems.length > visibleSupplementalItems.length) {
+    const nextEndTime =
+      visibleSupplementalItems[visibleSupplementalItems.length - 1].lastVisitTime + 1;
+    historyOlderEndTime = historyHasMoreResults && Number.isFinite(historyOlderEndTime)
+      ? Math.min(historyOlderEndTime, nextEndTime)
+      : nextEndTime;
+    historyHasMoreResults = true;
+  }
+  return [...mergedItems.values()]
+    .sort((first, second) => second.lastVisitTime - first.lastVisitTime);
+}
+
 async function loadOlderHistoryPage() {
   if (historyPageLoadPromise) {
     return historyPageLoadPromise;
@@ -3721,6 +3910,7 @@ async function loadRecentHistoryData() {
       .sort((a, b) => (b.lastVisitTime ?? 0) - (a.lastVisitTime ?? 0))
       .slice(0, MAX_HISTORY_RESULTS);
   }
+  recentPages = await includeRedirectAliasHistory(recentPages);
   historySnapshot = {
     folderKey: snapshotKey,
     syncedAt: queryStartedAt,
@@ -3750,21 +3940,25 @@ async function loadRecentHistoryData() {
   }
   historyInitialBatchLoading = true;
   renderHistory(recentPages);
+  renderFavoriteHistory(historyItems);
   loadBookmarkFavicons().catch((error) => {
     bookmarkStatus.textContent = `Could not load bookmark icons: ${error.message}`;
   });
   historyStatus.textContent = storageWarning;
-  try {
-    await fillHistoryBatch(getHistoryBatchSize(), true);
-  } finally {
+  const finishInitialHistoryBatch = (error = null) => {
     historyInitialBatchLoading = false;
     updateVisibleHistory();
     updateAutomaticSectionVisibility();
     renderFavoriteHistory(historyItems);
-    if (storageWarning) {
+    if (error) {
+      historyStatus.textContent = `Could not load initial previews: ${error.message}`;
+    } else if (storageWarning) {
       historyStatus.textContent = storageWarning;
     }
-  }
+  };
+  void fillHistoryBatch(getHistoryBatchSize(), true)
+    .then(() => finishInitialHistoryBatch())
+    .catch(finishInitialHistoryBatch);
 }
 
 function loadHistoryAfterBookmarks() {
@@ -3776,286 +3970,58 @@ function loadHistoryAfterBookmarks() {
     });
 }
 
-async function readLimitedResponse(response, maxBytes) {
-  if (!response.body) {
-    throw new Error("The site did not return a readable preview.");
-  }
-
-  const reader = response.body.getReader();
-  const chunks = [];
-  let total = 0;
-  while (total < maxBytes) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-    const remaining = maxBytes - total;
-    const chunk = value.subarray(0, remaining);
-    chunks.push(chunk);
-    total += chunk.byteLength;
-    if (value.byteLength > remaining || total === maxBytes) {
-      await reader.cancel();
-      break;
-    }
-  }
-
-  const result = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    result.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return result;
+function createHistoryDeleteButton(item) {
+  const button = document.createElement("button");
+  button.className = "preview-playlist-add preview-icon-link delete-history-entry";
+  button.type = "button";
+  const url = getHistoryUrl(item.url);
+  const label = item.title?.trim() || url?.hostname || "page";
+  button.title = "Delete from Firefox history";
+  button.setAttribute("aria-label", `Delete all visits to ${label} from Firefox history`);
+  button.append(createUiIcon("trash-can"));
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void deleteHistoryEntry(item.url, button);
+  });
+  return button;
 }
 
-async function fetchPreviewResponse(url, maxBytes, expectedType) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12_000);
+async function fetchFavoritePreviewResponse(url) {
+  let originalError;
   try {
-    const response = await fetch(url, {
-      credentials: "omit",
-      referrerPolicy: "no-referrer",
-      redirect: "error",
-      signal: controller.signal
-    });
-    if (!response.ok) {
-      throw new Error(`The site returned HTTP ${response.status}.`);
-    }
-
-    const contentType = response.headers.get("content-type")?.split(";")[0].trim().toLowerCase() ?? "";
-    if (!contentType.startsWith(expectedType)) {
-      throw new Error(`The site did not provide a ${expectedType} preview.`);
-    }
-    const bytes = await readLimitedResponse(response, maxBytes);
-    return { bytes, contentType, responseUrl: response.url };
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-async function forEachWithConcurrency(items, concurrency, callback) {
-  let nextIndex = 0;
-  const workers = Array.from(
-    { length: Math.min(concurrency, items.length) },
-    async () => {
-      while (nextIndex < items.length) {
-        const index = nextIndex++;
-        await callback(items[index]);
-      }
-    }
-  );
-  await Promise.all(workers);
-}
-
-function hasVideoObject(value) {
-  if (Array.isArray(value)) {
-    return value.some(hasVideoObject);
-  }
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const types = Array.isArray(value["@type"]) ? value["@type"] : [value["@type"]];
-  if (types.some((type) => typeof type === "string" && /(?:^|[/#])videoobject$/i.test(type))) {
-    return true;
-  }
-  return Object.values(value).some(hasVideoObject);
-}
-
-function getVideoObjectThumbnailUrls(value, thumbnails = []) {
-  if (Array.isArray(value)) {
-    for (const entry of value) {
-      getVideoObjectThumbnailUrls(entry, thumbnails);
-    }
-    return thumbnails;
-  }
-  if (!value || typeof value !== "object") {
-    return thumbnails;
-  }
-  const types = Array.isArray(value["@type"]) ? value["@type"] : [value["@type"]];
-  if (types.some((type) => typeof type === "string" && /(?:^|[/#])videoobject$/i.test(type))) {
-    const values = Array.isArray(value.thumbnailUrl) ? value.thumbnailUrl : [value.thumbnailUrl];
-    for (const thumbnail of values) {
-      if (typeof thumbnail === "string") {
-        thumbnails.push(thumbnail);
-      } else if (thumbnail && typeof thumbnail.url === "string") {
-        thumbnails.push(thumbnail.url);
-      }
-    }
-  }
-  for (const entry of Object.values(value)) {
-    getVideoObjectThumbnailUrls(entry, thumbnails);
-  }
-  return thumbnails;
-}
-
-function isIndividualVideoPage(document, pageUrl) {
-  const openGraphType = document
-    .querySelector('meta[property="og:type"]')
-    ?.getAttribute("content")
-    ?.trim()
-    .toLowerCase();
-  if (openGraphType?.startsWith("video.") || openGraphType === "video") {
-    return true;
-  }
-  if (document.querySelector(
-    'meta[property^="og:video"], meta[name="twitter:player"], meta[name="twitter:player:stream"]'
-  )) {
-    return true;
-  }
-  for (const script of document.querySelectorAll?.('script[type="application/ld+json"]') ?? []) {
-    try {
-      if (hasVideoObject(JSON.parse(script.textContent))) {
-        return true;
-      }
-    } catch {
-      continue;
-    }
+    return await fetchPreviewResponse(url, MAX_HTML_BYTES, "text/html");
+  } catch (error) {
+    originalError = error;
   }
 
-  const url = new URL(pageUrl);
-  const path = url.pathname.toLowerCase();
-  const query = url.search.toLowerCase();
-  const categorySegments = new Set([
-    "categories", "category", "channels", "channel", "latest",
-    "popular", "trending", "search", "tags", "tag", "hot", "top",
-    "new", "recent", "featured", "recommended", "all", "browse"
-  ]);
-  if (/(?:^|\/)video-[a-z0-9_-]{4,}(?:\/|$)/i.test(path)) {
-    return true;
+  const sourceHostname = getBookmarkedSiteHostname(url);
+  const sourceSite = sourceHostname ? bookmarkedSites.get(sourceHostname) : null;
+  if (!sourceSite) {
+    throw originalError;
   }
-  if (/(?:^|\/)[a-z0-9_-]{5,}\/video\/?$/i.test(path)) {
-    return true;
-  }
-  const videoRoute = path.match(/\/(?:watch|video|clip|movie)\/([^/]+)/i);
-  if (videoRoute && videoRoute[1].length >= 5 && !categorySegments.has(videoRoute[1])) {
-    return true;
-  }
-  const pluralVideoRoute = path.match(/\/(?:videos|clips|movies)\/([^/]+)/i);
-  if (pluralVideoRoute &&
-      pluralVideoRoute[1].length >= 8 &&
-      /\d/.test(pluralVideoRoute[1]) &&
-      !categorySegments.has(pluralVideoRoute[1])) {
-    return true;
-  }
-  return /\/(?:video|clip|movie)[._-]?\d{4,}(?:\/|$)/i.test(path) ||
-    /[?&](?:viewkey|video_id|videoid|watch|v)=([^&]{3,})/i.test(query) ||
-    Boolean(document.querySelector(
-      "video[src], video[poster], video[data-src], video source[src], video source[data-src]"
-    ));
-}
 
-function findPageImageUrl(document, baseUrl) {
-  const imageMetadata = [
-    {
-      selector: 'meta[property="og:image"], meta[property="og:image:url"], meta[property="og:image:secure_url"]',
-      widthSelector: 'meta[property="og:image:width"]',
-      heightSelector: 'meta[property="og:image:height"]'
-    },
-    {
-      selector: 'meta[name="twitter:image"], meta[name="twitter:image:src"]',
-      widthSelector: 'meta[name="twitter:image:width"]',
-      heightSelector: 'meta[name="twitter:image:height"]'
-    },
-    {
-      selector: 'meta[itemprop="thumbnailUrl"], meta[name="thumbnail"]',
-      widthSelector: "",
-      heightSelector: ""
-    }
-  ];
-  const candidates = [];
-  const addCandidate = (value, score = 0) => {
-    if (!value) {
-      return;
-    }
-    try {
-      const imageUrl = getHistoryUrl(new URL(value, baseUrl).href);
-      if (imageUrl) {
-        candidates.push({ url: imageUrl.href, score });
-      }
-    } catch {
-      return;
-    }
-  };
-  for (const metadata of imageMetadata) {
-    const width = Number(metadata.widthSelector
-      ? document.querySelector(metadata.widthSelector)?.getAttribute("content")
-      : 0);
-    const height = Number(metadata.heightSelector
-      ? document.querySelector(metadata.heightSelector)?.getAttribute("content")
-      : 0);
-    const declaredSize = Number.isFinite(width) && width > 0
-      ? width * (Number.isFinite(height) && height > 0 ? height : 1)
-      : 0;
-    for (const meta of document.querySelectorAll(metadata.selector)) {
-      const content = meta.getAttribute("content")?.trim();
-      addCandidate(content, declaredSize);
-    }
+  let destination;
+  try {
+    destination = await getBookmarkRedirectDestination(url);
+  } catch {
+    throw originalError;
   }
-  for (const video of document.querySelectorAll("video[poster]")) {
-    addCandidate(video.getAttribute("poster"));
+  if (!destination) {
+    throw originalError;
   }
-  for (const link of document.querySelectorAll(
-    'link[rel="image_src"][href], link[itemprop="thumbnailUrl"][href]'
-  )) {
-    addCandidate(link.getAttribute("href"));
+  const destinationHostname = getBookmarkedSiteHostname(destination.href);
+  const destinationSite = destinationHostname ? bookmarkedSites.get(destinationHostname) : null;
+  if (destinationSite !== sourceSite) {
+    throw originalError;
   }
-  for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
-    try {
-      for (const thumbnail of getVideoObjectThumbnailUrls(JSON.parse(script.textContent))) {
-        addCandidate(thumbnail);
-      }
-    } catch {
-      continue;
-    }
+  if (!await hasOriginPermission(destination.href)) {
+    throw new Error(
+      `The redirected favorite site ${destination.hostname} needs access. Select Allow all sites to load its preview.`
+    );
   }
-  candidates.sort((left, right) => right.score - left.score);
-  if (candidates.length > 0) {
-    return candidates[0].url;
-  }
-  throw new Error("This page does not expose a supported preview image.");
-}
-
-function findPagePreviewImageUrl(html, baseUrl) {
-  const document = new DOMParser().parseFromString(html, "text/html");
-  return findPageImageUrl(document, baseUrl);
-}
-
-function findDirectVideoUrl(document, baseUrl) {
-  const sources = document.querySelectorAll(
-    "video[src], video source[src], video[data-src], video source[data-src]"
-  );
-  for (const source of sources) {
-    const sourceValue = source.getAttribute("src") || source.getAttribute("data-src");
-    if (!sourceValue) {
-      continue;
-    }
-    try {
-      const videoUrl = getHistoryUrl(new URL(sourceValue, baseUrl).href);
-      if (!videoUrl || !isSafeVideoSourceUrl(videoUrl.href)) {
-        continue;
-      }
-      const mediaType = source.getAttribute("type")?.split(";")[0].trim().toLowerCase() || "";
-      const hasPlayableType = /^video\/(mp4|webm|ogg|x-m4v)$/.test(mediaType);
-      const hasPlayableExtension = /\.(mp4|m4v|webm|ogv|ogg)$/i.test(videoUrl.pathname);
-      if (hasPlayableType || hasPlayableExtension) {
-        return videoUrl.href;
-      }
-    } catch {
-      continue;
-    }
-  }
-  return null;
-}
-
-function findThumbnailUrl(html, baseUrl, onVideoPageDetected) {
-  const document = new DOMParser().parseFromString(html, "text/html");
-  const isVideoPage = isIndividualVideoPage(document, baseUrl);
-  const videoUrl = isVideoPage ? findDirectVideoUrl(document, baseUrl) : null;
-  onVideoPageDetected(isVideoPage, videoUrl);
-  if (!isVideoPage) {
-    throw new Error("This page does not appear to be an individual video.");
-  }
-  return findPageImageUrl(document, baseUrl);
+  const response = await fetchPreviewResponse(destination.href, MAX_HTML_BYTES, "text/html");
+  return { ...response, redirectedFrom: url };
 }
 
 function showThumbnail(card, dataUrl, message) {
@@ -4085,6 +4051,7 @@ function updateVisibleHistory() {
       : hasPoster || showPosterlessVideo || (filtersActive && card.videoPage !== true);
     card.container.hidden = historyInitialBatchLoading || !canDisplay || visibleCount >= historyDisplayLimit;
     card.playlistButton.hidden = card.videoPage !== true;
+    card.deleteButton.classList.toggle("delete-history-entry--solo", card.playlistButton.hidden);
     if (canDisplay && !card.container.hidden) {
       if (hasPoster) {
         card.container.classList.toggle("featured-history-card", !featuredCardAssigned);
@@ -4190,7 +4157,240 @@ function needsThumbnailLoad(card) {
     (card.posterVersion < POSTER_QUALITY_VERSION || !card.imageFrame.querySelector("img"));
 }
 
-async function loadPagePreviews(cards = historyCards, prioritizedUrls = []) {
+async function getBookmarkRedirectDestination(bookmarkUrl) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8_000);
+  let response;
+  try {
+    response = await fetch(bookmarkUrl, {
+      headers: { Range: "bytes=0-0" },
+      credentials: "omit",
+      referrerPolicy: "no-referrer",
+      redirect: "follow",
+      cache: "no-store",
+      signal: controller.signal
+    });
+    const result = {
+      redirected: response.redirected,
+      status: response.status,
+      url: response.url
+    };
+    if (response.body) {
+      response.body.cancel().catch((error) => {
+        console.error("Could not stop the Joydash bookmark redirect check:", error);
+      });
+    }
+    response = result;
+  } finally {
+    clearTimeout(timeout);
+  }
+  if (!response.redirected || !response.status || response.status < 200 || response.status >= 300) {
+    return null;
+  }
+  const destination = getHistoryUrl(response.url);
+  if (!destination ||
+      destination.username ||
+      destination.password ||
+      destination.href.length > 4096 ||
+      destination.hostname.toLowerCase() === new URL(bookmarkUrl).hostname.toLowerCase() ||
+      (new URL(bookmarkUrl).protocol === "https:" && destination.protocol !== "https:")) {
+    return null;
+  }
+  return destination;
+}
+
+async function repairRedirectedFavoriteBookmark(pageUrl) {
+  const hostname = getBookmarkedSiteHostname(pageUrl);
+  const site = hostname ? bookmarkedSites.get(hostname) : null;
+  if (!site) {
+    return false;
+  }
+  const existingRepair = redirectRepairPromises.get(hostname);
+  if (existingRepair) {
+    return existingRepair;
+  }
+
+  const repair = (async () => {
+    const candidates = [...site.bookmarks]
+      .filter((bookmark) => !redirectedBookmarkIds.has(bookmark.id))
+      .sort((first, second) => {
+        const firstUrl = getHistoryUrl(first.url);
+        const secondUrl = getHistoryUrl(second.url);
+        const firstIsRoot = firstUrl?.pathname === "/" && !firstUrl.search;
+        const secondIsRoot = secondUrl?.pathname === "/" && !secondUrl.search;
+        return Number(secondIsRoot) - Number(firstIsRoot);
+      });
+    let permissionMissing = false;
+    for (const bookmark of candidates) {
+      const source = getHistoryUrl(bookmark.url);
+      if (!source || source.username || source.password) {
+        continue;
+      }
+      if (!await hasOriginPermission(source.href)) {
+        permissionMissing = true;
+        continue;
+      }
+      let destination;
+      try {
+        destination = await getBookmarkRedirectDestination(source.href);
+      } catch {
+        continue;
+      }
+      if (!destination) {
+        continue;
+      }
+      if (!await hasOriginPermission(destination.href)) {
+        bookmarkStatus.textContent =
+          `The redirected site ${destination.hostname} needs access. Select Allow all sites to update this bookmark.`;
+        return false;
+      }
+      if (!await updateBookmarkWithRedirectAlias(bookmark, destination)) {
+        continue;
+      }
+      redirectedBookmarkIds.add(bookmark.id);
+      bookmarkStatus.textContent =
+        `Updated "${bookmark.title || site.name}" to its redirected address; refreshing Continue history…`;
+      return true;
+    }
+    if (permissionMissing) {
+      bookmarkStatus.textContent =
+        "Redirect checks need site access. Select Allow all sites to check these bookmarks.";
+    }
+    return false;
+  })();
+  redirectRepairPromises.set(hostname, repair);
+  try {
+    return await repair;
+  } finally {
+    if (redirectRepairPromises.get(hostname) === repair) {
+      redirectRepairPromises.delete(hostname);
+    }
+  }
+}
+
+async function repairFavoriteBookmarksWithoutHistory() {
+  const sitesWithHistory = new Set(historyItems
+    .map((item) => getBookmarkedSiteHostname(item.url))
+    .filter(Boolean));
+  const sitesWithoutHistory = [...bookmarkedSites.values()]
+    .filter((site) => !sitesWithHistory.has(site.hostname));
+  let updated = false;
+  await forEachWithConcurrency(sitesWithoutHistory, 2, async (site) => {
+    const bookmark = site.bookmarks[0];
+    if (bookmark) {
+      updated = await repairRedirectedFavoriteBookmark(bookmark.url) || updated;
+    }
+  });
+  updated = await restoreFavoriteHistoryAliases() || updated;
+  return updated;
+}
+
+async function restoreFavoriteHistoryAliases() {
+  const historySearch = browser.history.search({
+    text: "",
+    startTime: 0,
+    maxResults: MAX_HISTORY_RESULTS
+  });
+  const savedHistory = browser.storage.local.get("historySnapshot");
+  const [recentItems, saved] = await Promise.all([historySearch, savedHistory]);
+  const savedItems = Array.isArray(saved.historySnapshot?.items)
+    ? saved.historySnapshot.items
+    : [];
+  const candidatesByOrigin = new Map();
+  const addHistoryCandidate = (item, expectedSite = null) => {
+    const url = getHistoryUrl(item?.url);
+    if (!url || url.username || url.password || getBookmarkedSiteHostname(url.href)) {
+      return;
+    }
+    const existingCandidate = candidatesByOrigin.get(url.origin);
+    let candidate = existingCandidate;
+    if (!candidate) {
+      candidate = {
+        url: url.href,
+        origin: url.origin,
+        lastVisitTime: Number.isFinite(item.lastVisitTime) ? item.lastVisitTime : 0,
+        isRootPage: url.pathname === "/" && !url.search,
+        expectedSites: new Set()
+      };
+      candidatesByOrigin.set(url.origin, candidate);
+    }
+    if (expectedSite) {
+      candidate.expectedSites.add(expectedSite);
+    }
+    if (!existingCandidate ||
+        (url.pathname === "/" && !url.search && !candidate.isRootPage) ||
+        ((url.pathname === "/" && !url.search) === candidate.isRootPage &&
+          (Number.isFinite(item.lastVisitTime) ? item.lastVisitTime : 0) > candidate.lastVisitTime)) {
+      candidate.url = url.href;
+      candidate.lastVisitTime = Number.isFinite(item.lastVisitTime) ? item.lastVisitTime : 0;
+      candidate.isRootPage = url.pathname === "/" && !url.search;
+    }
+  };
+  for (const item of [...recentItems, ...savedItems]) {
+    addHistoryCandidate(item);
+  }
+  const sitesWithHistory = [...new Set(bookmarkedSites.values())].filter((site) =>
+    historyItems.some((item) => getBookmarkedSiteHostname(item.url) === site.hostname)
+  );
+  const targetedSearches = sitesWithHistory.flatMap((site) =>
+    getFavoriteHistorySearchTerms(site).map((text) => ({ site, text }))
+  );
+  await forEachWithConcurrency(targetedSearches, 3, async ({ site, text }) => {
+    const items = await browser.history.search({
+      text,
+      startTime: 0,
+      maxResults: MAX_REDIRECT_HISTORY_SEARCH_RESULTS
+    });
+    for (const item of items) {
+      addHistoryCandidate(item, site);
+    }
+  });
+  const candidates = [...candidatesByOrigin.values()]
+    .sort((first, second) =>
+      Number(second.expectedSites.size > 0) - Number(first.expectedSites.size > 0) ||
+      second.lastVisitTime - first.lastVisitTime
+    )
+    .slice(0, MAX_REDIRECT_HISTORY_CANDIDATES);
+  if (candidates.length === 0) {
+    return false;
+  }
+
+  let aliasAdded = false;
+  await forEachWithConcurrency(candidates, 3, async (candidate) => {
+    if (!await hasOriginPermission(candidate.url)) {
+      return;
+    }
+    let destination;
+    try {
+      destination = await getBookmarkRedirectDestination(candidate.url);
+    } catch {
+      return;
+    }
+    if (!destination || !await hasOriginPermission(destination.href)) {
+      return;
+    }
+    const destinationHostname = getBookmarkedSiteHostname(destination.href);
+    const site = destinationHostname ? bookmarkedSites.get(destinationHostname) : null;
+    const bookmark = site?.bookmarks[0];
+    if (!bookmark ||
+        (candidate.expectedSites.size > 0 && !candidate.expectedSites.has(site))) {
+      return;
+    }
+    const added = await addBookmarkRedirectAlias(bookmark, candidate.origin);
+    aliasAdded = added || aliasAdded;
+    if (added) {
+      bookmarkStatus.textContent =
+        `Recovered previous-domain history for "${site.name}"; refreshing Continue history…`;
+    }
+  });
+  return aliasAdded;
+}
+
+async function loadPagePreviews(
+  cards = historyCards,
+  prioritizedUrls = [],
+  checkMissingFavoriteRedirects = false
+) {
   const checkingMessage = "Checking recent pages for preview images…";
   const cardsToCheck = cards.filter(needsPagePreviewCheck);
   const permittedCards = [];
@@ -4212,10 +4412,11 @@ async function loadPagePreviews(cards = historyCards, prioritizedUrls = []) {
     )
     : null;
   let metadataChanged = false;
+  let redirectedBookmarkUpdated = false;
   await forEachWithConcurrency(permittedCards, 3, async (card) => {
     card.status.textContent = "Checking page…";
     try {
-      const response = await fetchPreviewResponse(card.item.url, MAX_HTML_BYTES, "text/html");
+      const response = await fetchFavoritePreviewResponse(card.item.url);
       const html = new TextDecoder().decode(response.bytes);
       const imageUrl = findThumbnailUrl(
         html,
@@ -4244,11 +4445,26 @@ async function loadPagePreviews(cards = historyCards, prioritizedUrls = []) {
       if (metadata?.checkedAt === card.metadataCheckedAt) {
         metadata.imageUrl = card.imageUrl;
       }
-      card.status.textContent = "Preview found.";
+      card.status.textContent = response.redirectedFrom
+        ? `Preview found on ${new URL(response.responseUrl).hostname}.`
+        : "Preview found.";
     } catch (error) {
-      card.status.textContent = `No preview: ${error.message}`;
+      try {
+        const bookmarkUpdated = await repairRedirectedFavoriteBookmark(card.item.url);
+        redirectedBookmarkUpdated = bookmarkUpdated || redirectedBookmarkUpdated;
+        card.status.textContent = bookmarkUpdated
+          ? "Favorite bookmark updated after redirect; refreshing history…"
+          : `No preview: ${error.message}`;
+      } catch (repairError) {
+        card.status.textContent =
+          `No preview: ${error.message}. Could not update its bookmark: ${repairError.message}`;
+      }
     }
   });
+  if (checkMissingFavoriteRedirects) {
+    redirectedBookmarkUpdated =
+      await repairFavoriteBookmarksWithoutHistory() || redirectedBookmarkUpdated;
+  }
   pageChecksComplete = true;
   if (checkingStatusTimer !== null) {
     clearTimeout(checkingStatusTimer);
@@ -4258,6 +4474,10 @@ async function loadPagePreviews(cards = historyCards, prioritizedUrls = []) {
   }
   if (metadataChanged) {
     await savePreviewMetadataCache();
+  }
+  if (redirectedBookmarkUpdated) {
+    scheduleBookmarkRefresh();
+    return false;
   }
 
   const availableCards = cards.filter(needsThumbnailLoad);
@@ -4389,6 +4609,7 @@ async function loadBookmarks() {
     saved = await browser.storage.local.get([
       "bookmarkFolderIds",
       "bookmarkFolderId",
+      "bookmarkRedirectAliases",
       "faviconCache",
       "shortcutPreferences",
       "continueSectionCollapsed",
@@ -4447,6 +4668,24 @@ async function loadBookmarks() {
   if (!root || !Array.isArray(root.children)) {
     throw new Error("Firefox did not return a bookmarks folder tree.");
   }
+  const bookmarkIds = new Set();
+  const collectBookmarkIds = (node) => {
+    if (typeof node.url === "string") {
+      bookmarkIds.add(node.id);
+    }
+    for (const child of node.children ?? []) {
+      collectBookmarkIds(child);
+    }
+  };
+  collectBookmarkIds(root);
+  bookmarkRedirectAliases = normalizeBookmarkRedirectAliases(
+    saved.bookmarkRedirectAliases,
+    bookmarkIds
+  );
+  if (JSON.stringify(saved.bookmarkRedirectAliases ?? {}) !==
+      JSON.stringify(bookmarkRedirectAliases)) {
+    await browser.storage.local.set({ bookmarkRedirectAliases });
+  }
 
   bookmarkFolders = getBookmarkFolders(root);
   const hasSavedFolderIds = Array.isArray(saved.bookmarkFolderIds);
@@ -4487,6 +4726,10 @@ async function loadBookmarks() {
 function scheduleBookmarkRefresh() {
   clearTimeout(refreshTimer);
   refreshTimer = setTimeout(() => {
+    if (historyFillInProgress || historyInitialBatchLoading || historyLoadInProgress) {
+      scheduleBookmarkRefresh();
+      return;
+    }
     loadBookmarks()
       .then(loadHistoryAfterBookmarks)
       .catch((error) => {
@@ -4511,52 +4754,104 @@ function scheduleHistoryReconciliation() {
   }, 100);
 }
 
-discreetModeToggleButton.addEventListener("click", async () => {
-  discreetModeToggleButton.disabled = true;
-  historyStatus.textContent = "";
-  try {
-    await setDiscreetCover(true);
-  } catch (error) {
-    historyStatus.textContent = `Could not cover Joydash: ${error.message}`;
-  } finally {
-    discreetModeToggleButton.disabled = false;
+function handleHistoryVisitsRemoved({ allHistory, urls }) {
+  if (allHistory) {
+    for (const timer of pendingHistoryDeleteTimers.values()) {
+      clearTimeout(timer);
+    }
+    pendingHistoryDeleteTimers.clear();
+    pendingHistoryDeleteUrls.clear();
+    scheduleHistoryReconciliation();
+    return;
   }
-});
+  const removedUrls = Array.isArray(urls) ? urls : [];
+  let hasExternalRemoval = removedUrls.length === 0;
+  for (const url of removedUrls) {
+    if (!pendingHistoryDeleteUrls.has(url)) {
+      hasExternalRemoval = true;
+      continue;
+    }
+    clearTimeout(pendingHistoryDeleteTimers.get(url));
+    pendingHistoryDeleteTimers.delete(url);
+    pendingHistoryDeleteUrls.delete(url);
+  }
+  if (hasExternalRemoval) {
+    scheduleHistoryReconciliation();
+  }
+}
 
-revealDiscreetCoverButton.addEventListener("click", async () => {
-  revealDiscreetCoverButton.disabled = true;
-  try {
-    await setDiscreetCover(false);
-  } catch (error) {
-    discreetCoverStatus.textContent = `Could not reveal Joydash: ${error.message}`;
-  } finally {
-    revealDiscreetCoverButton.disabled = false;
+async function deleteHistoryEntry(value, button) {
+  const url = getHistoryUrl(value);
+  if (!url) {
+    historyStatus.textContent = "Could not delete this page: its history URL is invalid.";
+    return;
   }
-});
+  if (pendingHistoryDeleteUrls.has(value)) {
+    return;
+  }
+  button.disabled = true;
+  pendingHistoryDeleteUrls.add(value);
+  try {
+    await browser.history.deleteUrl({ url: value });
+  } catch (error) {
+    pendingHistoryDeleteUrls.delete(value);
+    clearTimeout(pendingHistoryDeleteTimers.get(value));
+    pendingHistoryDeleteTimers.delete(value);
+    historyStatus.textContent = `Could not delete this page from Firefox history: ${error.message}`;
+    if (button.isConnected) {
+      button.disabled = false;
+    }
+    return;
+  }
 
-disableDiscreetModeButton.addEventListener("click", async () => {
-  disableDiscreetModeButton.disabled = true;
+  let localUpdateError = null;
   try {
-    await setDiscreetModeEnabled(false);
-    document.querySelector("#discreet-mode-settings summary").focus();
+    const removedCards = historyCards.filter((card) => card.item.url === value);
+    for (const card of removedCards) {
+      card.container.remove();
+    }
+    historyCards = historyCards.filter((card) => card.item.url !== value);
+    historyVisibleCount = Math.max(0, historyVisibleCount - removedCards.length);
+    historyItems = historyItems.filter((item) => item.url !== value);
+    historySeenUrls.delete(value);
+    if (historySnapshot) {
+      historySnapshot = {
+        ...historySnapshot,
+        items: (Array.isArray(historySnapshot.items) ? historySnapshot.items : [])
+          .filter((item) => item.url !== value)
+      };
+      try {
+        await browser.storage.local.set({ historySnapshot });
+      } catch (error) {
+        localUpdateError = error;
+        scheduleHistoryReconciliation();
+      }
+    }
+    updateHistoryFilterOptions();
+    updateHistoryFilterStatus();
+    updateVisibleHistory();
+    updateLoadMoreHistoryButton();
+    renderFavoriteHistory(historyItems);
+    renderRandomVideoSection();
+    updatePreviewLoadButton();
   } catch (error) {
-    discreetCoverStatus.textContent = `Could not disable discreet mode: ${error.message}`;
-  } finally {
-    disableDiscreetModeButton.disabled = false;
+    localUpdateError = error;
+    scheduleHistoryReconciliation();
   }
-});
-
-discreetModeEnabledCheckbox.addEventListener("change", async () => {
-  discreetModeEnabledCheckbox.disabled = true;
-  try {
-    await setDiscreetModeEnabled(discreetModeEnabledCheckbox.checked);
-  } catch (error) {
-    discreetModeEnabledCheckbox.checked = discreetModeEnabled;
-    historyStatus.textContent = `Could not update discreet mode: ${error.message}`;
-  } finally {
-    discreetModeEnabledCheckbox.disabled = false;
+  historyStatus.textContent = localUpdateError
+    ? `Deleted visits from Firefox, but Joydash could not fully update its local history: ${localUpdateError.message}`
+    : `Deleted all visits to ${url.hostname} from Firefox history.`;
+  if (pendingHistoryDeleteUrls.has(value)) {
+    const timer = window.setTimeout(() => {
+      pendingHistoryDeleteUrls.delete(value);
+      pendingHistoryDeleteTimers.delete(value);
+    }, 5_000);
+    pendingHistoryDeleteTimers.set(value, timer);
   }
-});
+  if (button.isConnected) {
+    button.disabled = false;
+  }
+}
 
 bookmarkFolderSelect.addEventListener("change", async () => {
   const folderId = bookmarkFolderSelect.value;
@@ -4746,6 +5041,13 @@ showLessVideoPlaylistButton.addEventListener("click", () => {
 historyHoverPreviewSaveButton.addEventListener("click", () => {
   if (activeHistoryPreviewItem) {
     openAddToPlaylistDialog({ ...activeHistoryPreviewItem, videoPage: true });
+  }
+});
+historyHoverPreviewDeleteButton.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  if (activeHistoryPreviewItem) {
+    void deleteHistoryEntry(activeHistoryPreviewItem.url, historyHoverPreviewDeleteButton);
   }
 });
 
@@ -5001,8 +5303,10 @@ loadPreviewsButton.addEventListener("click", async () => {
   updateHistoryFilterControls();
   loadPreviewsButton.disabled = true;
   try {
-    await loadPagePreviews();
-    await fillHistoryBatch(historyDisplayLimit);
+    const previewsLoaded = await loadPagePreviews(historyCards, [], true);
+    if (previewsLoaded) {
+      await fillHistoryBatch(historyDisplayLimit);
+    }
   } catch (error) {
     historyStatus.textContent = `Could not load previews: ${error.message}`;
   } finally {
@@ -5034,14 +5338,13 @@ browser.bookmarks?.onChanged?.addListener(scheduleBookmarkRefresh);
 browser.bookmarks?.onMoved?.addListener(scheduleBookmarkRefresh);
 browser.bookmarks?.onRemoved?.addListener(scheduleBookmarkRefresh);
 browser.bookmarks?.onChildrenReordered?.addListener(scheduleBookmarkRefresh);
-browser.history?.onVisitRemoved?.addListener(scheduleHistoryReconciliation);
-initializeDiscreetMode()
+browser.history?.onVisitRemoved?.addListener(handleHistoryVisitsRemoved);
+discreetMode.initialize()
   .then(loadBookmarks)
   .then(loadHistoryAfterBookmarks)
   .catch((error) => {
-    if (!discreetModeInitialized) {
-      discreetCoverStatus.textContent = `Could not initialize discreet mode: ${error.message}`;
-      revealDiscreetCoverButton.hidden = false;
+    if (!discreetMode.isInitialized()) {
+      discreetMode.showInitializationError(error);
       return;
     }
     dashboardSectionStack.hidden = false;
@@ -5052,7 +5355,7 @@ initializeDiscreetMode()
       recentHistorySection.hidden = false;
     }
     showBookmarkLoadError(error);
-    if (discreetCoverActive) {
-      discreetCoverStatus.textContent = `Bookmarks unavailable: ${error.message}`;
+    if (discreetMode.isCoverActive()) {
+      discreetMode.setStatus(`Bookmarks unavailable: ${error.message}`);
     }
   });

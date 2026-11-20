@@ -4,6 +4,7 @@ if (!globalThis.__joydashHomeButtonInstalled) {
   const host = document.createElement("div");
   host.hidden = true;
   const shadowRoot = host.attachShadow({ mode: "closed" });
+  const coverStyles = document.createElement("style");
   const style = document.createElement("style");
   style.textContent = `
     :host {
@@ -14,7 +15,7 @@ if (!globalThis.__joydashHomeButtonInstalled) {
       bottom: 16px !important;
       display: block !important;
       width: 42px !important;
-      height: 42px !important;
+      height: auto !important;
       color-scheme: dark !important;
       pointer-events: auto !important;
     }
@@ -23,7 +24,15 @@ if (!globalThis.__joydashHomeButtonInstalled) {
       display: none !important;
     }
 
-    button {
+    .button-stack {
+      position: relative;
+      z-index: 2147483647;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .button-stack > button {
       all: initial;
       box-sizing: border-box;
       width: 42px;
@@ -41,19 +50,23 @@ if (!globalThis.__joydashHomeButtonInstalled) {
       -webkit-tap-highlight-color: transparent;
     }
 
-    button:hover,
-    button:focus-visible {
-      border-color: rgba(255, 255, 255, 0.72);
+    .button-stack > button[hidden] {
+      display: none;
+    }
+
+    .button-stack > button:hover,
+    .button-stack > button:focus-visible {
+      border-color: #fff;
       background: rgba(32, 32, 36, 0.98);
       opacity: 1;
     }
 
-    button:focus-visible {
+    .button-stack > button:focus-visible {
       outline: 2px solid #fff;
       outline-offset: 3px;
     }
 
-    button:disabled {
+    .button-stack > button:disabled {
       cursor: progress;
     }
 
@@ -66,11 +79,25 @@ if (!globalThis.__joydashHomeButtonInstalled) {
     }
 
     @media (prefers-reduced-motion: reduce) {
-      button {
+      .button-stack > button {
         transition: none;
       }
     }
   `;
+
+  const buttonStack = document.createElement("div");
+  buttonStack.className = "button-stack";
+  const coverButton = document.createElement("button");
+  coverButton.type = "button";
+  coverButton.className = "cover-button";
+  coverButton.setAttribute("aria-label", "Cover this favorite page");
+  coverButton.title = "Cover this favorite page";
+  const coverIcon = document.createElement("img");
+  coverIcon.className = "home-icon";
+  coverIcon.src = browser.runtime.getURL("icons/ui/hide.svg");
+  coverIcon.alt = "";
+  coverIcon.setAttribute("aria-hidden", "true");
+  coverButton.append(coverIcon);
 
   const button = document.createElement("button");
   button.type = "button";
@@ -82,24 +109,92 @@ if (!globalThis.__joydashHomeButtonInstalled) {
   icon.alt = "";
   icon.setAttribute("aria-hidden", "true");
   button.append(icon);
+  buttonStack.append(coverButton, button);
+
+  const { element: coverScreen, status: coverStatus } = globalThis.JoydashDiscreetCover.create(document);
+  fetch(browser.runtime.getURL("discreet-cover.css"))
+    .then((response) => {
+      if (!response.ok) {
+        throw new Error(`Stylesheet request returned ${response.status}.`);
+      }
+      return response.text();
+    })
+    .then((css) => {
+      coverStyles.textContent = css;
+    })
+    .catch((error) => {
+      console.error("Could not load the Joydash discreet-cover styles:", error);
+      coverStatus.textContent = `Could not load cover styles: ${error.message}`;
+    });
+
   let homeButtonEnabled = false;
   let isFullscreen = false;
+  let fullscreenStateKnown = false;
+  let isFavoritePage = false;
+  let discreetModeEnabled = false;
+  let discreetModeContext = "both";
+  let discreetCoverActive = false;
+  const isDiscreetModeContextActive = () => discreetModeContext === "both" ||
+    (fullscreenStateKnown &&
+      ((discreetModeContext === "fullscreen" && isFullscreen) ||
+       (discreetModeContext === "windowed" && !isFullscreen)));
+  const shouldShowDiscreetCover = () => isFavoritePage &&
+    discreetModeEnabled &&
+    discreetCoverActive &&
+    isDiscreetModeContextActive();
   const updateHomeButtonVisibility = () => {
-    host.hidden = !homeButtonEnabled || !isFullscreen || Boolean(document.fullscreenElement);
+    const showHomeActions = homeButtonEnabled && isFullscreen && !document.fullscreenElement;
+    const showCoverAction = isFavoritePage &&
+      discreetModeEnabled &&
+      isDiscreetModeContextActive();
+    const showDiscreetCover = shouldShowDiscreetCover();
+    host.hidden = !showHomeActions && !showCoverAction && !showDiscreetCover;
+    button.hidden = !showHomeActions || showDiscreetCover;
+    coverButton.hidden = !showCoverAction;
+    coverButton.title = showDiscreetCover ? "Reveal this favorite page" : "Cover this favorite page";
+    coverButton.setAttribute(
+      "aria-label",
+      showDiscreetCover ? "Reveal this favorite page" : "Cover this favorite page"
+    );
+    coverScreen.hidden = !showDiscreetCover;
   };
   let fullscreenPortConnected = true;
   const fullscreenPort = browser.runtime.connect({ name: "joydash-home-button" });
   fullscreenPort.onMessage.addListener((message) => {
+    if (message?.type === "joydash:page-state") {
+      const wasCovered = shouldShowDiscreetCover();
+      isFavoritePage = message.favorite === true;
+      discreetModeEnabled = message.discreetModeEnabled === true;
+      discreetModeContext = ["both", "fullscreen", "windowed"].includes(message.discreetModeContext)
+        ? message.discreetModeContext
+        : "both";
+      discreetCoverActive = message.covered === true;
+      updateHomeButtonVisibility();
+      if (shouldShowDiscreetCover() && !wasCovered) {
+        coverScreen.focus();
+      }
+      return;
+    }
+    if (message?.type === "joydash:cover-error") {
+      console.error("Could not update the Joydash cover:", message.message);
+      return;
+    }
     if (message?.type !== "joydash:fullscreen-state") {
       return;
     }
+    const wasCovered = shouldShowDiscreetCover();
     isFullscreen = message.fullscreen === true;
+    fullscreenStateKnown = true;
     updateHomeButtonVisibility();
+    if (shouldShowDiscreetCover() && !wasCovered) {
+      coverScreen.focus();
+    }
   });
   document.addEventListener("fullscreenchange", updateHomeButtonVisibility);
   fullscreenPort.onDisconnect.addListener(() => {
     fullscreenPortConnected = false;
     isFullscreen = false;
+    fullscreenStateKnown = false;
     updateHomeButtonVisibility();
   });
   window.addEventListener("resize", () => {
@@ -124,8 +219,33 @@ if (!globalThis.__joydashHomeButtonInstalled) {
       button.title = "Could not return to Joydash";
     }
   });
+  coverButton.addEventListener("click", () => {
+    fullscreenPort.postMessage({
+      type: discreetCoverActive
+        ? "joydash:reveal-favorite-page"
+        : "joydash:cover-favorite-page"
+    });
+  });
+  document.addEventListener("keydown", (event) => {
+    if (!shouldShowDiscreetCover()) {
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      fullscreenPort.postMessage({ type: "joydash:reveal-favorite-page" });
+    } else if (event.key === "Tab") {
+      event.preventDefault();
+      coverButton.focus();
+    }
+  }, true);
+  document.addEventListener("focusin", (event) => {
+    if (shouldShowDiscreetCover() &&
+        !event.composedPath().includes(host)) {
+      coverScreen.focus();
+    }
+  }, true);
 
-  shadowRoot.append(style, button);
+  shadowRoot.append(style, coverStyles, buttonStack, coverScreen);
   document.documentElement.append(host);
 
   let homeButtonPreferenceChanged = false;

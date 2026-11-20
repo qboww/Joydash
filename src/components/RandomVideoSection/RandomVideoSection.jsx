@@ -32,6 +32,15 @@ function RandomVideoSlot({ number }) {
       >
         <img className="ui-icon preview-action-icon" src="icons/ui/bookmark.svg" alt="" />
       </button>
+      <button
+        className="preview-playlist-add preview-icon-link random-video-history-delete"
+        type="button"
+        aria-label={`Delete ${number === 1 ? "first" : "second"} random preview from Firefox history`}
+        title="Delete from Firefox history"
+        hidden
+      >
+        <img className="ui-icon preview-action-icon" src="icons/ui/trash-can.svg" alt="" />
+      </button>
     </div>
   );
 }

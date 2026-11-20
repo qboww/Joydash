@@ -1,3 +1,19 @@
+import { useLayoutEffect, useRef } from "react";
+import "../../../discreet-cover-component.js";
+
+function DiscreetCover() {
+  const mountRef = useRef(null);
+
+  useLayoutEffect(() => {
+    const cover = globalThis.JoydashDiscreetCover.create(document);
+    const mount = mountRef.current;
+    mount.append(cover.element);
+    return () => cover.element.remove();
+  }, []);
+
+  return <div ref={mountRef} />;
+}
+
 export default function Overlays() {
   return (
     <>
@@ -17,16 +33,28 @@ export default function Overlays() {
           role="status"
           aria-live="polite"
         />
-        <button
-          id="history-hover-preview-save"
-          className="preview-playlist-add preview-icon-link"
-          type="button"
-          aria-label="Add video to a playlist"
-          title="Add to playlist"
-          hidden
-        >
-          <img className="ui-icon preview-action-icon" src="icons/ui/bookmark.svg" alt="" />
-        </button>
+        <div id="history-hover-preview-actions">
+          <button
+            id="history-hover-preview-save"
+            className="preview-playlist-add preview-icon-link"
+            type="button"
+            aria-label="Add video to a playlist"
+            title="Add to playlist"
+            hidden
+          >
+            <img className="ui-icon preview-action-icon" src="icons/ui/bookmark.svg" alt="" />
+          </button>
+          <button
+            id="history-hover-preview-delete"
+            className="preview-playlist-add preview-icon-link"
+            type="button"
+            aria-label="Delete this page from Firefox history"
+            title="Delete from Firefox history"
+            hidden
+          >
+            <img className="ui-icon preview-action-icon" src="icons/ui/trash-can.svg" alt="" />
+          </button>
+        </div>
       </div>
       <dialog
         id="add-to-playlist-dialog"
@@ -55,27 +83,7 @@ export default function Overlays() {
           </div>
         </form>
       </dialog>
-      <div
-        id="discreet-cover"
-        className="discreet-cover"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="discreet-cover-heading"
-      >
-        <div className="discreet-cover-panel">
-          <p className="eyebrow">PRIVATE SPACE</p>
-          <h1 id="discreet-cover-heading">Joydash is covered</h1>
-          <p id="discreet-cover-status" role="status" aria-live="polite">
-            Preparing your dashboard…
-          </p>
-          <button id="reveal-discreet-cover" className="text-button" type="button" hidden>
-            Show Joydash
-          </button>
-          <button id="disable-discreet-mode" className="discreet-cover-disable" type="button" hidden>
-            Disable discreet mode
-          </button>
-        </div>
-      </div>
+      <DiscreetCover />
     </>
   );
 }

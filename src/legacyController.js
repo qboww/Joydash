@@ -1,5 +1,6 @@
 import { createDiscreetModeController } from "./controllers/discreetModeController.js";
 import { createDashboardSectionController } from "./controllers/dashboardSectionController.js";
+import { createHistoryFilterController } from "./controllers/historyFilterController.js";
 import { createPreviewPageParser } from "./services/previewPageParser.js";
 import {
   fetchPreviewResponse,
@@ -121,7 +122,6 @@ let historyItems = [];
 let historyVisibleCount = 0;
 let historyDisplayLimit = 0;
 let historyFilterControlsBusy = false;
-let historyFilterDebounceTimer;
 let historyHasMoreResults = false;
 let historyOlderEndTime = null;
 let historySeenUrls = new Set();
@@ -236,6 +236,50 @@ const dashboardSections = createDashboardSectionController({
   settings: document.querySelector("#dashboard-settings"),
   reducedMotionPreference
 });
+
+const historyFilters = createHistoryFilterController({
+  document,
+  searchInput: historySearchInput,
+  clearSearchButton: clearHistorySearchButton,
+  siteFilter: historySiteFilter,
+  dateFilter: historyDateFilter,
+  videoOnlyFilter: historyVideoOnlyFilter,
+  includeNoPreviewFilter: historyIncludeNoPreviewFilter,
+  resetButton: resetHistoryFiltersButton,
+  status: historyFilterStatus,
+  getItems: () => historyItems,
+  getHistoryUrl,
+  getVisibleCount: () => historyVisibleCount,
+  hasMoreResults: () => historyHasMoreResults,
+  isBusy: () => historyFilterControlsBusy || historyFillInProgress || historyInitialBatchLoading,
+  applyFilters: applyHistoryFilters,
+  loadFilteredPreviews: loadFilteredHistoryPreviews,
+  debounceMs: HISTORY_FILTER_DEBOUNCE_MS
+});
+
+function hasActiveHistoryFilters() {
+  return historyFilters.hasActiveFilters();
+}
+
+function isVideoOnlyFilterEnabled() {
+  return historyFilters.isVideoOnly();
+}
+
+function getFilteredHistoryItems(items) {
+  return historyFilters.getFilteredItems(items);
+}
+
+function updateHistoryFilterOptions() {
+  historyFilters.updateOptions();
+}
+
+function updateHistoryFilterStatus(items) {
+  historyFilters.updateStatus(items);
+}
+
+function updateHistoryFilterControls() {
+  historyFilters.updateControls();
+}
 
 for (const slot of randomVideoSlots) {
   slot.link.addEventListener("click", handleRandomVideoSlotClick);
@@ -1923,124 +1967,26 @@ function setHistoryPlaceholder(imageFrame, message = "Your next favorite") {
   imageFrame.replaceChildren(placeholder);
 }
 
-function hasActiveHistoryFilters() {
-  return Boolean(
-    historySearchInput.value.trim() ||
-    historySiteFilter.value ||
-    historyDateFilter.value
-  );
-}
-
-function isVideoOnlyFilterEnabled() {
-  return historyVideoOnlyFilter.checked;
-}
-
-function getFilteredHistoryItems(items = historyItems) {
-  const query = historySearchInput.value.trim().toLowerCase();
-  const selectedSite = historySiteFilter.value;
-  const dateFilter = historyDateFilter.value;
-  const now = Date.now();
-  const dateLimits = {
-    "3h": now - 3 * 60 * 60 * 1000,
-    "8h": now - 8 * 60 * 60 * 1000,
-    "24h": now - 24 * 60 * 60 * 1000,
-    "7d": now - 7 * 24 * 60 * 60 * 1000,
-    "30d": now - 30 * 24 * 60 * 60 * 1000
-  };
-  const cutoff = dateLimits[dateFilter] ?? null;
-
-  return items.filter((item) => {
-    const url = getHistoryUrl(item.url);
-    if (!url || (selectedSite && url.hostname !== selectedSite)) {
-      return false;
-    }
-    if (query && !`${item.title ?? ""} ${item.url} ${url.hostname}`.toLowerCase().includes(query)) {
-      return false;
-    }
-    return cutoff === null ||
-      (Number.isFinite(item.lastVisitTime) && item.lastVisitTime >= cutoff);
-  });
-}
-
-function updateHistoryFilterOptions() {
-  const selectedSite = historySiteFilter.value;
-  const sites = [...new Set(historyItems
-    .map((item) => getHistoryUrl(item.url)?.hostname)
-    .filter(Boolean))]
-    .sort((a, b) => a.localeCompare(b));
-  const allSitesOption = document.createElement("option");
-  allSitesOption.value = "";
-  allSitesOption.textContent = "All bookmarked sites";
-  historySiteFilter.replaceChildren(allSitesOption);
-  for (const site of sites) {
-    const option = document.createElement("option");
-    option.value = site;
-    option.textContent = site;
-    historySiteFilter.append(option);
-  }
-  if (sites.includes(selectedSite)) {
-    historySiteFilter.value = selectedSite;
-  }
-}
-
-function updateHistoryFilterStatus(items = getFilteredHistoryItems()) {
-  const videosOnly = isVideoOnlyFilterEnabled();
-  const includeNoPreviewVideos = historyIncludeNoPreviewFilter.checked;
-  if (!hasActiveHistoryFilters() && !videosOnly && !includeNoPreviewVideos) {
-    historyFilterStatus.textContent = "";
-    return;
-  }
-  const verifiedVideos = videosOnly
-    ? items.filter((item) => item.videoPage === true).length
-    : items.length;
-  const countLabel = videosOnly
-    ? `${verifiedVideos} verified video page${verifiedVideos === 1 ? "" : "s"} in loaded history.`
-    : `${items.length} matching page${items.length === 1 ? "" : "s"} in loaded history.`;
-  const hasMoreToCheck = historyVisibleCount < items.length || historyHasMoreResults;
-  const hasUnclassifiedItems = videosOnly &&
-    items.some((item) => typeof item.videoPage !== "boolean");
-  historyFilterStatus.textContent = hasMoreToCheck
-    ? `${countLabel} Select View more to check further history.`
-    : hasUnclassifiedItems
-      ? `${countLabel} Select Load previews to check remaining pages.`
-      : countLabel;
-}
-
-function updateHistoryFilterControls() {
-  const disabled = historyFilterControlsBusy || historyFillInProgress || historyInitialBatchLoading;
-  historySearchInput.disabled = disabled;
-  clearHistorySearchButton.disabled = disabled;
-  clearHistorySearchButton.hidden = !historySearchInput.value;
-  historySiteFilter.disabled = disabled;
-  historyDateFilter.disabled = disabled;
-  historyVideoOnlyFilter.disabled = disabled;
-  historyIncludeNoPreviewFilter.disabled = disabled;
-  resetHistoryFiltersButton.disabled = disabled ||
-    (!hasActiveHistoryFilters() &&
-      isVideoOnlyFilterEnabled() &&
-      !historyIncludeNoPreviewFilter.checked);
-}
-
 function renderFilteredHistory() {
   historyGrid.replaceChildren();
   historyCards = [];
   historyVisibleCount = 0;
   historyDisplayLimit = getHistoryBatchSize();
   previewPhase = "pages";
-  updateHistoryFilterStatus();
+  historyFilters.updateStatus();
   appendNextHistoryBatch();
   renderFavoriteHistory(historyItems);
 }
 
 function applyHistoryFilters() {
-  if (historyFilterControlsBusy || historyFillInProgress || historyInitialBatchLoading) {
+  if (historyFilters.isBusy()) {
     return;
   }
   renderFilteredHistory();
 }
 
 async function loadFilteredHistoryPreviews() {
-  if (historyFilterControlsBusy || historyFillInProgress || historyInitialBatchLoading) {
+  if (historyFilters.isBusy()) {
     return;
   }
   const cardsToLoad = historyCards.filter((card) =>
@@ -2050,7 +1996,7 @@ async function loadFilteredHistoryPreviews() {
   const wasVisibilityDeferred = historyVisibilityDeferred;
   historyVisibilityDeferred = true;
   historyFilterControlsBusy = true;
-  updateHistoryFilterControls();
+  historyFilters.updateControls();
   try {
     if (cardsToLoad.length > 0) {
       const previewsLoaded = await loadPagePreviews(cardsToLoad);
@@ -2064,30 +2010,13 @@ async function loadFilteredHistoryPreviews() {
   } finally {
     historyVisibilityDeferred = wasVisibilityDeferred;
     historyFilterControlsBusy = false;
-    updateHistoryFilterControls();
+    historyFilters.updateControls();
     if (!historyVisibilityDeferred) {
       updateVisibleHistory();
     }
-    updateHistoryFilterStatus();
+    historyFilters.updateStatus();
     updatePreviewLoadButton();
   }
-}
-
-function scheduleHistoryFilterApply() {
-  clearTimeout(historyFilterDebounceTimer);
-  updateHistoryFilterControls();
-  historyFilterDebounceTimer = setTimeout(() => {
-    if (historyFilterControlsBusy || historyFillInProgress || historyInitialBatchLoading) {
-      scheduleHistoryFilterApply();
-      return;
-    }
-    applyHistoryFilters();
-    if (hasActiveHistoryFilters() ||
-        isVideoOnlyFilterEnabled() ||
-        historyIncludeNoPreviewFilter.checked) {
-      loadFilteredHistoryPreviews();
-    }
-  }, HISTORY_FILTER_DEBOUNCE_MS);
 }
 
 function getHistoryColumnCount() {
@@ -4986,26 +4915,6 @@ clearPreviewsButton.addEventListener("click", async () => {
     clearPreviewsButton.disabled = false;
   }
 });
-
-historySearchInput.addEventListener("input", scheduleHistoryFilterApply);
-clearHistorySearchButton.addEventListener("click", () => {
-  historySearchInput.value = "";
-  scheduleHistoryFilterApply();
-  historySearchInput.focus();
-});
-historySiteFilter.addEventListener("change", scheduleHistoryFilterApply);
-historyDateFilter.addEventListener("change", scheduleHistoryFilterApply);
-historyVideoOnlyFilter.addEventListener("change", scheduleHistoryFilterApply);
-historyIncludeNoPreviewFilter.addEventListener("change", scheduleHistoryFilterApply);
-resetHistoryFiltersButton.addEventListener("click", () => {
-  historySearchInput.value = "";
-  historySiteFilter.value = "";
-  historyDateFilter.value = "";
-  historyVideoOnlyFilter.checked = true;
-  historyIncludeNoPreviewFilter.checked = false;
-  scheduleHistoryFilterApply();
-});
-updateHistoryFilterControls();
 
 loadMoreHistoryButton.addEventListener("click", async () => {
   if (historyFillInProgress || loadMoreHistoryButton.hidden) {

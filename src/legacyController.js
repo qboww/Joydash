@@ -1,6 +1,7 @@
 import { createDiscreetModeController } from "./controllers/discreetModeController.js";
 import { createDashboardSectionController } from "./controllers/dashboardSectionController.js";
 import { createHistoryFilterController } from "./controllers/historyFilterController.js";
+import { createHistoryHoverPreviewController } from "./controllers/historyHoverPreviewController.js";
 import { createPreviewPageParser } from "./services/previewPageParser.js";
 import {
   fetchPreviewResponse,
@@ -169,12 +170,6 @@ let randomVideoBackHistory = [];
 let randomVideoForwardHistory = [];
 let randomVideoClickedUrls = new Set();
 const reducedMotionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
-let activeHistoryPreviewEntry = null;
-let activeHistoryPreviewItem = null;
-let historyHoverPreviewTimer;
-let historyHoverPreviewHideTimer;
-const historyHoverPreviewCache = new Map();
-const historyHoverPreviewRequests = new Map();
 let previewPhase = "pages";
 let refreshTimer;
 let historyRefreshTimer;
@@ -255,6 +250,28 @@ const historyFilters = createHistoryFilterController({
   applyFilters: applyHistoryFilters,
   loadFilteredPreviews: loadFilteredHistoryPreviews,
   debounceMs: HISTORY_FILTER_DEBOUNCE_MS
+});
+
+const historyHoverPreviews = createHistoryHoverPreviewController({
+  document,
+  window,
+  preview: historyHoverPreview,
+  image: historyHoverPreviewImage,
+  title: historyHoverPreviewTitle,
+  message: historyHoverPreviewMessage,
+  saveButton: historyHoverPreviewSaveButton,
+  deleteButton: historyHoverPreviewDeleteButton,
+  getCachedPosterForUrl,
+  getHistoryCards: () => historyCards,
+  getVideoPlaylistPreviewMetadata,
+  getHistoryUrl,
+  hasOriginPermission,
+  fetchPreviewResponse,
+  findPagePreviewImageUrl,
+  fetchPreviewImageDataUrl,
+  maxHtmlBytes: MAX_HTML_BYTES,
+  maxCachedPreviews: MAX_HISTORY_HOVER_PREVIEWS,
+  delayMs: HISTORY_HOVER_PREVIEW_DELAY_MS
 });
 
 function hasActiveHistoryFilters() {
@@ -2985,224 +3002,6 @@ async function playRandomVideoPair(advance) {
   }
 }
 
-function hideHistoryHoverPreview() {
-  clearTimeout(historyHoverPreviewTimer);
-  clearTimeout(historyHoverPreviewHideTimer);
-  historyHoverPreviewTimer = null;
-  historyHoverPreviewHideTimer = null;
-  activeHistoryPreviewEntry = null;
-  activeHistoryPreviewItem = null;
-  historyHoverPreview.classList.remove("is-visible");
-  historyHoverPreview.setAttribute("aria-hidden", "true");
-  historyHoverPreviewImage.removeAttribute("src");
-  historyHoverPreviewImage.style.display = "";
-  historyHoverPreviewTitle.textContent = "";
-  historyHoverPreviewMessage.textContent = "";
-  historyHoverPreviewSaveButton.hidden = true;
-  historyHoverPreviewDeleteButton.hidden = true;
-}
-
-function hideHistoryHoverPreviewFor(link) {
-  if (activeHistoryPreviewEntry !== link ||
-      link.matches(":hover") ||
-      link === document.activeElement ||
-      historyHoverPreview.matches(":hover") ||
-      historyHoverPreview.contains(document.activeElement)) {
-    return;
-  }
-  clearTimeout(historyHoverPreviewHideTimer);
-  historyHoverPreviewHideTimer = setTimeout(() => {
-    if (activeHistoryPreviewEntry === link && !isHistoryHoverActive(link)) {
-      hideHistoryHoverPreview();
-    }
-  }, 250);
-}
-
-function showHistoryHoverPreview(link, item) {
-  clearTimeout(historyHoverPreviewTimer);
-  clearTimeout(historyHoverPreviewHideTimer);
-  activeHistoryPreviewEntry = link;
-  activeHistoryPreviewItem = item;
-  const cached = getCachedPosterForUrl(item.url);
-  const loadedCard = historyCards.find((card) => card.item.url === item.url);
-  const isVideoPage = item.videoPage === true ||
-    cached?.videoPage === true ||
-    loadedCard?.videoPage === true ||
-    getVideoPlaylistPreviewMetadata(item)?.videoPage === true;
-  historyHoverPreviewSaveButton.hidden = !isVideoPage;
-  historyHoverPreviewSaveButton.setAttribute(
-    "aria-label",
-    `Add ${item.title?.trim() || getHistoryUrl(item.url)?.hostname || "video"} to a playlist`
-  );
-  const itemLabel = item.title?.trim() || getHistoryUrl(item.url)?.hostname || "page";
-  historyHoverPreviewDeleteButton.hidden = false;
-  historyHoverPreviewDeleteButton.setAttribute(
-    "aria-label",
-    `Delete all visits to ${itemLabel} from Firefox history`
-  );
-  const posterDataUrl = cached?.videoPage === true && cached.dataUrl
-    ? cached.dataUrl
-    : loadedCard?.posterDataUrl;
-  if (typeof posterDataUrl === "string" && posterDataUrl.startsWith("data:image/jpeg;base64,")) {
-    updateHistoryHoverPreview(link, item, posterDataUrl, "");
-    return;
-  }
-
-  const genericPreview = historyHoverPreviewCache.get(item.url);
-  if (genericPreview) {
-    updateHistoryHoverPreview(link, item, genericPreview, "");
-    return;
-  }
-
-  updateHistoryHoverPreview(link, item, null, "Checking site access…");
-  historyHoverPreviewTimer = setTimeout(() => {
-    if (isHistoryHoverActive(link)) {
-      void loadGenericHistoryHoverPreview(link, item);
-    }
-  }, HISTORY_HOVER_PREVIEW_DELAY_MS);
-}
-
-function isHistoryHoverActive(link) {
-  return activeHistoryPreviewEntry === link &&
-    (link.matches(":hover") ||
-      link === document.activeElement ||
-      historyHoverPreview.matches(":hover") ||
-      historyHoverPreview.contains(document.activeElement));
-}
-
-function updateHistoryHoverPreview(link, item, dataUrl, message) {
-  if (activeHistoryPreviewEntry !== link) {
-    return;
-  }
-
-  const rect = link.getBoundingClientRect();
-  const width = Math.min(280, window.innerWidth - 24);
-  const actionButtonsHeight =
-    historyHoverPreviewSaveButton.hidden && historyHoverPreviewDeleteButton.hidden ? 0 : 44;
-  const height = (dataUrl ? width * 0.5625 + 48 : 104) + actionButtonsHeight;
-  let left = rect.left - width - 12;
-  if (left < 12) {
-    left = rect.right + 12;
-  }
-  left = Math.max(12, Math.min(left, window.innerWidth - width - 12));
-  const top = Math.max(12, Math.min(
-    rect.top + (rect.height - height) / 2,
-    window.innerHeight - height - 12
-  ));
-
-  if (dataUrl) {
-    historyHoverPreviewImage.src = dataUrl;
-    historyHoverPreviewImage.style.display = "";
-  } else {
-    historyHoverPreviewImage.removeAttribute("src");
-    historyHoverPreviewImage.style.display = "none";
-  }
-  historyHoverPreviewTitle.textContent =
-    link.querySelector(".favorite-history-title")?.textContent || new URL(item.url).hostname;
-  historyHoverPreviewMessage.textContent = message;
-  historyHoverPreview.style.width = `${width}px`;
-  historyHoverPreview.style.left = `${left}px`;
-  historyHoverPreview.style.top = `${top}px`;
-  historyHoverPreview.setAttribute("aria-hidden", "false");
-  historyHoverPreview.classList.add("is-visible");
-}
-
-function showHistoryHoverPermission(link, item, error) {
-  const hostType = error.hostType === "image" ? "image host" : "page site";
-  updateHistoryHoverPreview(
-    link,
-    item,
-    null,
-    `This ${hostType} needs access. Select Allow all sites above to load this preview.`
-  );
-}
-
-async function loadGenericHistoryHoverPreview(link, item) {
-  if (!isHistoryHoverActive(link)) {
-    return;
-  }
-
-  updateHistoryHoverPreview(link, item, null, "Checking site access…");
-  let request = historyHoverPreviewRequests.get(item.url);
-  if (!request) {
-    request = fetchGenericHistoryHoverPreview(item.url);
-    historyHoverPreviewRequests.set(item.url, request);
-  }
-
-  try {
-    const dataUrl = await request;
-    rememberGenericHistoryHoverPreview(item.url, dataUrl);
-    if (isHistoryHoverActive(link)) {
-      updateHistoryHoverPreview(link, item, dataUrl, "");
-    }
-  } catch (error) {
-    if (isHistoryHoverActive(link)) {
-      if (error instanceof UnapprovedHistoryPreviewHostError) {
-        showHistoryHoverPermission(link, item, error);
-      } else {
-        updateHistoryHoverPreview(link, item, null, `Preview unavailable: ${error.message}`);
-      }
-    }
-  } finally {
-    if (historyHoverPreviewRequests.get(item.url) === request) {
-      historyHoverPreviewRequests.delete(item.url);
-    }
-  }
-}
-
-function rememberGenericHistoryHoverPreview(url, dataUrl) {
-  historyHoverPreviewCache.delete(url);
-  historyHoverPreviewCache.set(url, dataUrl);
-  while (historyHoverPreviewCache.size > MAX_HISTORY_HOVER_PREVIEWS) {
-    historyHoverPreviewCache.delete(historyHoverPreviewCache.keys().next().value);
-  }
-}
-
-class UnapprovedHistoryPreviewHostError extends Error {
-  constructor(url, hostType) {
-    super(`${hostType === "image" ? "Image host" : "Page site"} access is not approved.`);
-    this.name = "UnapprovedHistoryPreviewHostError";
-    this.url = url;
-    this.hostType = hostType;
-  }
-}
-
-async function fetchGenericHistoryHoverPreview(pageUrl) {
-  if (!await hasOriginPermission(pageUrl)) {
-    throw new UnapprovedHistoryPreviewHostError(pageUrl, "page");
-  }
-  const response = await fetchPreviewResponse(pageUrl, MAX_HTML_BYTES, "text/html");
-  const html = new TextDecoder().decode(response.bytes);
-  const imageUrl = findPagePreviewImageUrl(html, response.responseUrl || pageUrl);
-  if (!await hasOriginPermission(imageUrl)) {
-    throw new UnapprovedHistoryPreviewHostError(imageUrl, "image");
-  }
-  return fetchPreviewImageDataUrl(imageUrl);
-}
-
-historyHoverPreview.addEventListener("pointerenter", () => {
-  clearTimeout(historyHoverPreviewHideTimer);
-});
-historyHoverPreview.addEventListener("pointerleave", () => {
-  if (activeHistoryPreviewEntry) {
-    hideHistoryHoverPreviewFor(activeHistoryPreviewEntry);
-  }
-});
-historyHoverPreview.addEventListener("focusout", () => {
-  const link = activeHistoryPreviewEntry;
-  if (!link) {
-    return;
-  }
-  clearTimeout(historyHoverPreviewHideTimer);
-  historyHoverPreviewHideTimer = setTimeout(() => {
-    if (activeHistoryPreviewEntry === link && !isHistoryHoverActive(link)) {
-      hideHistoryHoverPreview();
-    }
-  }, 0);
-});
-window.addEventListener("scroll", hideHistoryHoverPreview, true);
-window.addEventListener("resize", hideHistoryHoverPreview);
-
 async function loadMoreFavoriteHistory(hostname, visibleLimit) {
   if (historyGroupLoadsInProgress.has(hostname)) {
     return;
@@ -3234,7 +3033,7 @@ async function loadMoreFavoriteHistory(hostname, visibleLimit) {
 }
 
 function renderFavoriteHistory(items) {
-  hideHistoryHoverPreview();
+  historyHoverPreviews.hide();
   const filteredItems = getFilteredHistoryItems(items);
   const groupedItems = new Map();
   for (const item of filteredItems) {
@@ -3340,10 +3139,10 @@ function renderFavoriteHistory(items) {
       pageTitle.className = "favorite-history-title";
       pageTitle.textContent = item.title?.trim() || url.hostname;
       link.append(pageTitle);
-      link.addEventListener("pointerenter", () => showHistoryHoverPreview(link, item));
-      link.addEventListener("pointerleave", () => hideHistoryHoverPreviewFor(link));
-      link.addEventListener("focus", () => showHistoryHoverPreview(link, item));
-      link.addEventListener("blur", () => hideHistoryHoverPreviewFor(link));
+      link.addEventListener("pointerenter", () => historyHoverPreviews.show(link, item));
+      link.addEventListener("pointerleave", () => historyHoverPreviews.hideFor(link));
+      link.addEventListener("focus", () => historyHoverPreviews.show(link, item));
+      link.addEventListener("blur", () => historyHoverPreviews.hideFor(link));
       if (Number.isFinite(item.lastVisitTime)) {
         const visitedAt = new Date(item.lastVisitTime);
         if (Number.isFinite(visitedAt.getTime())) {
@@ -4819,15 +4618,17 @@ showLessVideoPlaylistButton.addEventListener("click", () => {
 });
 
 historyHoverPreviewSaveButton.addEventListener("click", () => {
-  if (activeHistoryPreviewItem) {
-    openAddToPlaylistDialog({ ...activeHistoryPreviewItem, videoPage: true });
+  const activeItem = historyHoverPreviews.getActiveItem();
+  if (activeItem) {
+    openAddToPlaylistDialog({ ...activeItem, videoPage: true });
   }
 });
 historyHoverPreviewDeleteButton.addEventListener("click", (event) => {
   event.preventDefault();
   event.stopPropagation();
-  if (activeHistoryPreviewItem) {
-    void deleteHistoryEntry(activeHistoryPreviewItem.url, historyHoverPreviewDeleteButton);
+  const activeItem = historyHoverPreviews.getActiveItem();
+  if (activeItem) {
+    void deleteHistoryEntry(activeItem.url, historyHoverPreviewDeleteButton);
   }
 });
 

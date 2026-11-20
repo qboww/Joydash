@@ -142,6 +142,42 @@ if (!globalThis.__joydashHomeButtonInstalled) {
     discreetModeEnabled &&
     discreetCoverActive &&
     isDiscreetModeContextActive();
+  const coveredPageTitle = "Joydash";
+  let originalPageTitle = null;
+  let pageTitleObserver = null;
+  const updatePageTitle = (covered) => {
+    if (covered) {
+      if (!pageTitleObserver) {
+        originalPageTitle = document.title;
+        pageTitleObserver = new MutationObserver(() => {
+          if (!shouldShowDiscreetCover() || document.title === coveredPageTitle) {
+            return;
+          }
+          originalPageTitle = document.title;
+          document.title = coveredPageTitle;
+        });
+        pageTitleObserver.observe(document.head, {
+          childList: true,
+          characterData: true,
+          subtree: true
+        });
+      }
+      if (document.title !== coveredPageTitle) {
+        originalPageTitle = document.title;
+        document.title = coveredPageTitle;
+      }
+      return;
+    }
+    if (!pageTitleObserver) {
+      return;
+    }
+    pageTitleObserver.disconnect();
+    pageTitleObserver = null;
+    if (document.title === coveredPageTitle && originalPageTitle !== null) {
+      document.title = originalPageTitle;
+    }
+    originalPageTitle = null;
+  };
   const updateHomeButtonVisibility = () => {
     const showHomeActions = homeButtonEnabled && isFullscreen && !document.fullscreenElement;
     const showCoverAction = isFavoritePage &&
@@ -157,6 +193,7 @@ if (!globalThis.__joydashHomeButtonInstalled) {
       showDiscreetCover ? "Reveal this favorite page" : "Cover this favorite page"
     );
     coverScreen.hidden = !showDiscreetCover;
+    updatePageTitle(showDiscreetCover);
   };
   let fullscreenPortConnected = true;
   const fullscreenPort = browser.runtime.connect({ name: "joydash-home-button" });

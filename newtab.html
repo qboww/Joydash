@@ -5,6 +5,52 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="dark">
     <title>Joydash</title>
+    <style>
+      #discreet-cover-boot {
+        box-sizing: border-box;
+        min-height: 100vh;
+        padding: 24px;
+        display: grid;
+        place-items: center;
+        position: fixed;
+        z-index: 10001;
+        inset: 0;
+        background: #080808;
+        color: #f7f0eb;
+        font-family: Roboto, "Segoe UI", Arial, sans-serif;
+        text-align: center;
+      }
+
+      #discreet-cover-boot-panel {
+        box-sizing: border-box;
+        width: min(380px, 100%);
+        padding: 28px;
+        border: 1px solid rgba(235, 206, 171, 0.18);
+        border-radius: 16px;
+        background: #0e0e0e;
+      }
+
+      #discreet-cover-boot-eyebrow {
+        margin: 0 0 7px;
+        color: #c99c72;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.24em;
+      }
+
+      #discreet-cover-boot-heading {
+        margin: 0;
+        font-size: clamp(24px, 5vw, 34px);
+        font-weight: 400;
+      }
+
+      #discreet-cover-boot-status {
+        margin: 10px 0 0;
+        color: #8b9099;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+    </style>
     <link rel="icon" type="image/png" sizes="16x16" href="icons/homeboard-16.png">
     <link rel="icon" type="image/png" sizes="32x32" href="icons/homeboard-32.png">
     <link rel="icon" type="image/png" sizes="48x48" href="icons/homeboard-48.png">
@@ -12,6 +58,13 @@
     <link rel="shortcut icon" type="image/png" href="icons/homeboard-48.png">
   </head>
   <body>
+    <div id="discreet-cover-boot" role="dialog" aria-modal="true" aria-labelledby="discreet-cover-boot-heading">
+      <div id="discreet-cover-boot-panel">
+        <p id="discreet-cover-boot-eyebrow">PRIVATE SPACE</p>
+        <h1 id="discreet-cover-boot-heading">Joydash is covered</h1>
+        <p id="discreet-cover-boot-status" role="status" aria-live="polite">Starting Joydash securely...</p>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

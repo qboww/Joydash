@@ -21,6 +21,8 @@ export function createDiscreetModeController({
   let isFullscreen = false;
   let fullscreenStateKnown = false;
   const dashboardPagePort = browser.runtime.connect({ name: "joydash-dashboard-page" });
+  const bootCover = document.querySelector("#discreet-cover-boot");
+  const bootStatus = document.querySelector("#discreet-cover-boot-status");
 
   function isContextActive() {
     return context === "both" ||
@@ -136,10 +138,15 @@ export function createDiscreetModeController({
     }
     initialized = true;
     updateUI();
+    bootCover?.remove();
   }
 
   function showInitializationError(error) {
-    status.textContent = `Could not initialize discreet mode: ${error.message}`;
+    const message = `Could not initialize discreet mode: ${error.message}`;
+    status.textContent = message;
+    if (bootStatus) {
+      bootStatus.textContent = message;
+    }
   }
 
   dashboardPagePort.onMessage.addListener((message) => {

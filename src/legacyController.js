@@ -1,4 +1,5 @@
 import { createDiscreetModeController } from "./controllers/discreetModeController.js";
+import { createDashboardSectionController } from "./controllers/dashboardSectionController.js";
 import { createPreviewPageParser } from "./services/previewPageParser.js";
 import {
   fetchPreviewResponse,
@@ -39,13 +40,7 @@ const resetHistoryFiltersButton = document.querySelector("#reset-history-filters
 const historyFilterStatus = document.querySelector("#history-filter-status");
 const showLessHistoryButton = document.querySelector("#show-less-history");
 const loadMoreHistoryButton = document.querySelector("#load-more-history");
-const manageDashboardSectionsButton = document.querySelector("#manage-dashboard-sections");
-const closeDashboardSectionArrangerButton = document.querySelector("#close-dashboard-section-arranger");
-const saveDashboardSectionOrderButton = document.querySelector("#save-dashboard-section-order");
 const homeButtonEnabledCheckbox = document.querySelector("#show-home-button");
-const dashboardSectionArranger = document.querySelector("#dashboard-section-arranger");
-const dashboardSectionOrderList = document.querySelector("#dashboard-section-order-list");
-const dashboardSectionOrderStatus = document.querySelector("#dashboard-section-order-status");
 const dashboardSectionStack = document.querySelector("#dashboard-section-stack");
 const randomVideoSection = document.querySelector("#random-video-section");
 const randomVideoBackButton = document.querySelector("#random-video-back");
@@ -113,10 +108,6 @@ let automaticSectionsDataReady = false;
 let automaticSectionsInitialRevealComplete = false;
 let automaticSectionRevealInProgress = false;
 let automaticSectionsRevealed = new Set();
-let dashboardSectionOrder = [];
-let dashboardSectionOrderDraft = [];
-let dashboardSectionOrderSaving = false;
-let dashboardSectionPointerDrag = null;
 let shortcutPreferences = {};
 let manageShortcuts = false;
 let draggedShortcut = null;
@@ -230,6 +221,20 @@ const discreetMode = createDiscreetModeController({
   homeButtonCheckbox: homeButtonEnabledCheckbox,
   historyStatus,
   onCoverChange: updateRandomVideoPlayback
+});
+
+const dashboardSections = createDashboardSectionController({
+  browser,
+  document,
+  stack: dashboardSectionStack,
+  arranger: document.querySelector("#dashboard-section-arranger"),
+  list: document.querySelector("#dashboard-section-order-list"),
+  status: document.querySelector("#dashboard-section-order-status"),
+  manageButton: document.querySelector("#manage-dashboard-sections"),
+  closeButton: document.querySelector("#close-dashboard-section-arranger"),
+  saveButton: document.querySelector("#save-dashboard-section-order"),
+  settings: document.querySelector("#dashboard-settings"),
+  reducedMotionPreference
 });
 
 for (const slot of randomVideoSlots) {
@@ -348,12 +353,6 @@ function renderBookmarkFolders() {
   bookmarkFolderSelect.disabled = bookmarkFolders.length === 0;
 }
 
-function getDashboardSections() {
-  return [...dashboardSectionStack.children].filter((section) =>
-    section.dataset.dashboardSection
-  );
-}
-
 function updateHistoryRailDateTime() {
   const now = new Date();
   const formattedDate = new Intl.DateTimeFormat(undefined, {
@@ -376,83 +375,6 @@ function updateHistoryRailDateTime() {
   );
 }
 
-function normalizeDashboardSectionOrder(savedOrder) {
-  const availableIds = getDashboardSections().map((section) => section.dataset.dashboardSection);
-  const validSavedIds = Array.isArray(savedOrder)
-    ? savedOrder.filter((id) => typeof id === "string" && availableIds.includes(id))
-    : [];
-  return [...new Set([...validSavedIds, ...availableIds])];
-}
-
-function hasDashboardSectionOrderChanges() {
-  return dashboardSectionOrderDraft.length !== dashboardSectionOrder.length ||
-    dashboardSectionOrderDraft.some((sectionId, index) =>
-      sectionId !== dashboardSectionOrder[index]
-    );
-}
-
-function setDashboardSectionOrderDraft(order) {
-  dashboardSectionOrderDraft = normalizeDashboardSectionOrder(order);
-  dashboardSectionOrderStatus.textContent = hasDashboardSectionOrderChanges()
-    ? "Unsaved order changes."
-    : "";
-  renderDashboardSectionOrderList();
-}
-
-function renderDashboardSectionOrderList() {
-  dashboardSectionOrderList.replaceChildren();
-  const sectionsById = new Map(
-    getDashboardSections().map((section) => [section.dataset.dashboardSection, section])
-  );
-  dashboardSectionOrderDraft.forEach((sectionId, index) => {
-    const section = sectionsById.get(sectionId);
-    if (!section) {
-      return;
-    }
-    const item = document.createElement("li");
-    item.className = "dashboard-section-order-item";
-    item.dataset.dashboardSection = sectionId;
-    item.draggable = false;
-    const label = document.createElement("span");
-    label.textContent = section.dataset.dashboardSectionLabel;
-    const controls = document.createElement("div");
-    controls.className = "dashboard-section-order-controls";
-    for (const [direction, text] of [[-1, "Up"], [1, "Down"]]) {
-      const button = document.createElement("button");
-      button.className = "text-button dashboard-section-order-button";
-      button.type = "button";
-      button.textContent = text;
-      button.setAttribute("aria-label", `Move ${section.dataset.dashboardSectionLabel} ${text.toLowerCase()}`);
-      button.disabled = dashboardSectionOrderSaving ||
-        index + direction < 0 ||
-        index + direction >= dashboardSectionOrderDraft.length;
-      button.addEventListener("click", () => {
-        void moveDashboardSection(sectionId, direction);
-      });
-      controls.append(button);
-    }
-    item.append(label, controls);
-    dashboardSectionOrderList.append(item);
-  });
-  saveDashboardSectionOrderButton.disabled = dashboardSectionOrderSaving ||
-    !hasDashboardSectionOrderChanges();
-}
-
-function applyDashboardSectionOrder(order) {
-  dashboardSectionOrder = normalizeDashboardSectionOrder(order);
-  dashboardSectionOrderDraft = [...dashboardSectionOrder];
-  const sectionsById = new Map(
-    getDashboardSections().map((section) => [section.dataset.dashboardSection, section])
-  );
-  for (const sectionId of dashboardSectionOrder) {
-    const section = sectionsById.get(sectionId);
-    if (section) {
-      dashboardSectionStack.append(section);
-    }
-  }
-  renderDashboardSectionOrderList();
-}
-
 function shouldShowDashboardSection(sectionId) {
   if (sectionId === "recent-history") {
     return true;
@@ -463,46 +385,6 @@ function shouldShowDashboardSection(sectionId) {
   return sectionId === videoPlaylistsSection.dataset.dashboardSection;
 }
 
-async function saveDashboardSectionOrder(order) {
-  if (dashboardSectionOrderSaving) {
-    return;
-  }
-  const nextOrder = normalizeDashboardSectionOrder(order);
-  if (nextOrder.length === dashboardSectionOrder.length &&
-      nextOrder.every((sectionId, index) => sectionId === dashboardSectionOrder[index])) {
-    return;
-  }
-  const previousOrder = [...dashboardSectionOrder];
-  dashboardSectionOrderSaving = true;
-  dashboardSectionOrderStatus.textContent = "";
-  applyDashboardSectionOrder(nextOrder);
-  try {
-    await browser.storage.local.set({ dashboardSectionOrder });
-    return true;
-  } catch (error) {
-    applyDashboardSectionOrder(previousOrder);
-    dashboardSectionOrderStatus.textContent = `Could not save section order: ${error.message}`;
-    return false;
-  } finally {
-    dashboardSectionOrderSaving = false;
-    renderDashboardSectionOrderList();
-  }
-}
-
-async function moveDashboardSection(sectionId, direction) {
-  if (dashboardSectionOrderSaving) {
-    return;
-  }
-  const currentIndex = dashboardSectionOrderDraft.indexOf(sectionId);
-  const nextIndex = currentIndex + direction;
-  if (currentIndex < 0 || nextIndex < 0 || nextIndex >= dashboardSectionOrderDraft.length) {
-    return;
-  }
-  const nextOrder = [...dashboardSectionOrderDraft];
-  [nextOrder[currentIndex], nextOrder[nextIndex]] = [nextOrder[nextIndex], nextOrder[currentIndex]];
-  setDashboardSectionOrderDraft(nextOrder);
-}
-
 function updateAutomaticSectionVisibility() {
   if (!automaticSectionsDataReady && !automaticSectionsInitialRevealComplete) {
     return;
@@ -510,7 +392,7 @@ function updateAutomaticSectionVisibility() {
   if (automaticSectionRevealInProgress) {
     return;
   }
-  const automaticSections = getDashboardSections().filter((section) =>
+  const automaticSections = dashboardSections.getSections().filter((section) =>
     section.dataset.dashboardSection !== "recent-history"
   );
   if (automaticSectionsInitialRevealComplete) {
@@ -538,7 +420,7 @@ function updateAutomaticSectionVisibility() {
     return;
   }
   dashboardSectionStack.hidden = false;
-  for (const section of getDashboardSections()) {
+  for (const section of dashboardSections.getSections()) {
     const sectionId = section.dataset.dashboardSection;
     if (automaticSectionsRevealed.has(sectionId)) {
       continue;
@@ -4618,10 +4500,10 @@ async function loadBookmarks() {
       "selectedVideoPlaylistId"
     ]);
   } catch (error) {
-    applyDashboardSectionOrder([]);
+    dashboardSections.applyOrder([]);
     throw error;
   }
-  applyDashboardSectionOrder(saved.dashboardSectionOrder);
+  dashboardSections.applyOrder(saved.dashboardSectionOrder);
   videoPlaylists = normalizeVideoPlaylists(saved.videoPlaylists);
   selectedVideoPlaylistId = videoPlaylists.some((playlist) =>
     playlist.id === saved.selectedVideoPlaylistId
@@ -4634,7 +4516,6 @@ async function loadBookmarks() {
     throw treeResult.error;
   }
   const tree = treeResult.tree;
-  manageDashboardSectionsButton.disabled = false;
   shortcutPreferences = saved.shortcutPreferences &&
     typeof saved.shortcutPreferences === "object" &&
     !Array.isArray(saved.shortcutPreferences)
@@ -4882,27 +4763,6 @@ manageShortcutsButton.addEventListener("click", () => {
   renderBookmarks(bookmarkGroups);
 });
 
-manageDashboardSectionsButton.addEventListener("click", () => {
-  const isExpanded = manageDashboardSectionsButton.getAttribute("aria-expanded") === "true";
-  manageDashboardSectionsButton.setAttribute("aria-expanded", String(!isExpanded));
-  dashboardSectionArranger.hidden = isExpanded;
-  if (!isExpanded) {
-    dashboardSectionOrderStatus.textContent = hasDashboardSectionOrderChanges()
-      ? "Unsaved order changes."
-      : "";
-    renderDashboardSectionOrderList();
-  }
-  document.querySelector("#dashboard-settings").open = false;
-});
-
-function closeDashboardSectionArranger() {
-  dashboardSectionArranger.hidden = true;
-  manageDashboardSectionsButton.setAttribute("aria-expanded", "false");
-  document.querySelector("#dashboard-settings > summary").focus();
-}
-
-closeDashboardSectionArrangerButton.addEventListener("click", closeDashboardSectionArranger);
-
 homeButtonEnabledCheckbox.addEventListener("change", async () => {
   const enabled = homeButtonEnabledCheckbox.checked;
   homeButtonEnabledCheckbox.disabled = true;
@@ -4913,15 +4773,6 @@ homeButtonEnabledCheckbox.addEventListener("change", async () => {
     historyStatus.textContent = `Could not save Home button setting: ${error.message}`;
   } finally {
     homeButtonEnabledCheckbox.disabled = false;
-  }
-});
-
-saveDashboardSectionOrderButton.addEventListener("click", async () => {
-  const order = [...dashboardSectionOrderList.children]
-    .map((item) => item.dataset.dashboardSection);
-  const saved = await saveDashboardSectionOrder(order);
-  if (saved) {
-    closeDashboardSectionArranger();
   }
 });
 
@@ -5048,110 +4899,6 @@ historyHoverPreviewDeleteButton.addEventListener("click", (event) => {
   event.stopPropagation();
   if (activeHistoryPreviewItem) {
     void deleteHistoryEntry(activeHistoryPreviewItem.url, historyHoverPreviewDeleteButton);
-  }
-});
-
-dashboardSectionOrderList.addEventListener("pointerdown", (event) => {
-  const item = event.target.closest(".dashboard-section-order-item");
-  if (dashboardSectionOrderSaving ||
-      event.button !== 0 ||
-      !item ||
-      event.target.closest("button")) {
-    return;
-  }
-  dashboardSectionPointerDrag = {
-    item,
-    pointerId: event.pointerId,
-    startX: event.clientX,
-    startY: event.clientY,
-    active: false,
-  };
-  dashboardSectionOrderList.setPointerCapture(event.pointerId);
-});
-
-document.addEventListener("pointermove", (event) => {
-  const drag = dashboardSectionPointerDrag;
-  if (!drag || event.pointerId !== drag.pointerId || dashboardSectionOrderSaving) {
-    return;
-  }
-
-  if (!drag.active) {
-    const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
-    if (distance < 5) {
-      return;
-    }
-    drag.active = true;
-    drag.item.classList.add("is-dragging");
-  }
-
-  event.preventDefault();
-  const listBounds = dashboardSectionOrderList.getBoundingClientRect();
-  if (event.clientY < listBounds.top || event.clientY > listBounds.bottom) {
-    return;
-  }
-  const currentItems = [...dashboardSectionOrderList.children];
-  const currentIndex = currentItems.indexOf(drag.item);
-  const otherItems = currentItems.filter((item) => item !== drag.item);
-  const nextIndex = otherItems.findIndex((item) => {
-    const bounds = item.getBoundingClientRect();
-    return event.clientY < bounds.top + bounds.height / 2;
-  });
-  const destinationIndex = nextIndex < 0 ? otherItems.length : nextIndex;
-  if (destinationIndex === currentIndex) {
-    return;
-  }
-
-  const affectedItems = otherItems.slice(
-    Math.min(currentIndex, destinationIndex),
-    Math.max(currentIndex, destinationIndex)
-  );
-  for (const sectionItem of affectedItems) {
-    for (const animation of sectionItem.getAnimations()) {
-      animation.cancel();
-    }
-  }
-  const previousTops = new Map(
-    affectedItems.map((sectionItem) => [sectionItem, sectionItem.getBoundingClientRect().top])
-  );
-  dashboardSectionOrderList.insertBefore(drag.item, otherItems[destinationIndex] ?? null);
-  if (reducedMotionPreference.matches) {
-    return;
-  }
-  for (const sectionItem of affectedItems) {
-    const offset = previousTops.get(sectionItem) - sectionItem.getBoundingClientRect().top;
-    if (offset !== 0) {
-      sectionItem.animate(
-        [{ transform: `translateY(${offset}px)` }, { transform: "translateY(0)" }],
-        { duration: 110, easing: "ease-out" }
-      );
-    }
-  }
-});
-
-document.addEventListener("pointerup", (event) => {
-  const drag = dashboardSectionPointerDrag;
-  if (!drag || event.pointerId !== drag.pointerId) {
-    return;
-  }
-  dashboardSectionPointerDrag = null;
-  if (!drag.active) {
-    return;
-  }
-  event.preventDefault();
-  drag.item.classList.remove("is-dragging");
-  setDashboardSectionOrderDraft([...dashboardSectionOrderList.children]
-    .map((item) => item.dataset.dashboardSection));
-});
-
-document.addEventListener("pointercancel", (event) => {
-  const drag = dashboardSectionPointerDrag;
-  if (!drag || event.pointerId !== drag.pointerId) {
-    return;
-  }
-  dashboardSectionPointerDrag = null;
-  drag.item.classList.remove("is-dragging");
-  if (drag.active) {
-    renderDashboardSectionOrderList();
   }
 });
 
@@ -5348,7 +5095,7 @@ discreetMode.initialize()
       return;
     }
     dashboardSectionStack.hidden = false;
-    const recentHistorySection = getDashboardSections().find((section) =>
+    const recentHistorySection = dashboardSections.getSections().find((section) =>
       section.dataset.dashboardSection === "recent-history"
     );
     if (recentHistorySection) {
